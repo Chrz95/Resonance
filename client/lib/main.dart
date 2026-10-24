@@ -11,11 +11,15 @@ import 'api.dart';
 import 'availability_badges.dart';
 import 'candidate_availability.dart';
 import 'android_engine.dart';
+import 'local_engine.dart';
+import 'windows_engine.dart';
 import 'engine.dart';
 import 'models.dart';
 import 'connection_store.dart';
 import 'song_import.dart';
 import 'alternate_picker.dart';
+import 'session_store.dart';
+import 'recovering_engine.dart';
 
 const background = Color(0xFF101116);
 const panel = Color(0xFF191A22);
@@ -30,9 +34,11 @@ class ResonanceApp extends StatelessWidget {
     super.key,
     this.enableDesktopDrop = true,
     this.autoConnect = true,
+    this.persistSessions = true,
   });
   final bool enableDesktopDrop;
   final bool autoConnect;
+  final bool persistSessions;
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'Resonance',
@@ -84,6 +90,7 @@ class ResonanceApp extends StatelessWidget {
     home: Studio(
       enableDesktopDrop: enableDesktopDrop,
       autoConnect: autoConnect,
+      persistSessions: persistSessions,
     ),
   );
 }
@@ -93,9 +100,11 @@ class Studio extends StatefulWidget {
     super.key,
     this.enableDesktopDrop = true,
     this.autoConnect = true,
+    this.persistSessions = true,
   });
   final bool enableDesktopDrop;
   final bool autoConnect;
+  final bool persistSessions;
   @override
   State<Studio> createState() => _StudioState();
 }
@@ -124,22 +133,296 @@ class _StudioState extends State<Studio> {
   int connectionGeneration = 0;
   int availabilityGeneration = 0;
   bool handlingDrop = false;
+  SessionStore? sessionStore;
+  RecoveringEngine? recoveringEngine;
+  Timer? autosaveTimer;
+  Future<void>? saveInFlight;
+  late final AppLifecycleListener lifecycle;
+  bool restoringSession = false, savingSession = false, disposed = false;
+  int sessionRevision = 0, savedRevision = 0;
+  String? sessionIssue;
+  final sessionMessages = <String>[];
+  static const windowSession = MethodChannel('org.resonance/session-window');
+  bool closeRequested = false;
+
+  Future<void> initializeWindowSession() async {
+    if (!Platform.isWindows || !widget.persistSessions) return;
+    windowSession.setMethodCallHandler((call) async {
+      if (call.method != 'closeRequested' || closeRequested) return;
+      closeRequested = true;
+      availabilityGeneration++;
+      try {
+        await flushSession(throwOnError: true);
+        await windowSession.invokeMethod<void>('allowClose');
+      } catch (_) {
+        if (!mounted) return;
+        final quit = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Session could not be saved'),
+            content: const Text(
+              'Recent changes have not been saved on this device. Keep the app open to retry or export your edits.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Keep open'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Quit anyway'),
+              ),
+            ],
+          ),
+        );
+        await windowSession.invokeMethod<void>(
+          quit == true ? 'allowClose' : 'cancelClose',
+        );
+      } finally {
+        closeRequested = false;
+      }
+    });
+    try {
+      await windowSession.invokeMethod<void>('ready');
+    } catch (_) {
+      if (mounted)
+        super.setState(
+          () => sessionMessages.add(
+            'Rebuild the Windows runner with the bootstrap script to enable the close-time session checkpoint.',
+          ),
+        );
+    }
+  }
+
+  @override
+  void setState(VoidCallback fn) {
+    if (disposed) return;
+    super.setState(fn);
+    if (widget.persistSessions && sessionStore != null && !restoringSession) {
+      sessionRevision++;
+      autosaveTimer?.cancel();
+      autosaveTimer = Timer(
+        const Duration(milliseconds: 300),
+        () => unawaited(flushSession()),
+      );
+    }
+  }
+
+  RecoveringEngine get trackEngine {
+    final active = api;
+    if (active == null)
+      throw ApiException(
+        'The service is offline. Your local edits can still be saved; reconnect to process or export audio.',
+      );
+    if (recoveringEngine == null ||
+        !identical(recoveringEngine!.delegate, active))
+      attachRecovery();
+    return recoveringEngine!;
+  }
+
+  void attachRecovery() {
+    if (api == null) {
+      recoveringEngine = null;
+      return;
+    }
+    final next = RecoveringEngine(api!);
+    for (final track in tracks) {
+      if (track.sourcePath != null)
+        next.register(
+          track.id,
+          track.sourcePath!,
+          track.filename,
+          size: track.size,
+          digest: track.sourceDigest,
+        );
+    }
+    recoveringEngine = next;
+  }
+
+  Future<void> openWorkspace(
+    String origin, {
+    Future<void> Function()? beforeCommit,
+  }) async {
+    if (!widget.persistSessions || sessionStore?.origin == origin) {
+      await beforeCommit?.call();
+      return;
+    }
+    await flushSession(throwOnError: true);
+    final wasBusy = busy;
+    super.setState(() {
+      restoringSession = true;
+      busy = true;
+      activity = 'Restoring saved session…';
+    });
+    SessionStore? next;
+    try {
+      next = await SessionStore.open(origin);
+      final restored = await next.load();
+      if (disposed) {
+        await next.close();
+        return;
+      }
+      await beforeCommit?.call();
+      final old = sessionStore;
+      await old?.close();
+      sessionStore = next;
+      super.setState(() {
+        tracks
+          ..clear()
+          ..addAll(restored.tracks);
+        selected = tracks.cast<TrackDraft?>().firstWhere(
+          (t) => t?.id == restored.selectedId,
+          orElse: () => tracks.isEmpty ? null : tracks.first,
+        );
+        tab = restored.tab;
+        sessionMessages
+          ..clear()
+          ..addAll(restored.messages);
+        sessionIssue = null;
+        sessionRevision = 0;
+        savedRevision = 0;
+        search.text = selected == null
+            ? ''
+            : '${selected!.tags['artist']} ${selected!.tags['title']}'.trim();
+        availabilityGeneration++;
+      });
+      attachRecovery();
+    } catch (e) {
+      if (next != null && !identical(next, sessionStore)) await next.close();
+      if (!disposed)
+        super.setState(
+          () => sessionIssue = 'Could not restore the saved session: $e',
+        );
+      rethrow;
+    } finally {
+      if (!disposed)
+        super.setState(() {
+          restoringSession = false;
+          busy = wasBusy;
+          activity = '';
+        });
+    }
+  }
+
+  Future<void> flushSession({bool throwOnError = false}) async {
+    autosaveTimer?.cancel();
+    final store = sessionStore;
+    if (store == null || restoringSession) return;
+    final pending = saveInFlight;
+    if (pending != null) {
+      await pending;
+      if (throwOnError && sessionIssue != null) throw StateError(sessionIssue!);
+      return;
+    }
+    final job = () async {
+      if (!disposed) super.setState(() => savingSession = true);
+      try {
+        do {
+          final revision = sessionRevision;
+          await store.save(
+            List<TrackDraft>.of(tracks),
+            selectedId: selected?.id,
+            tab: tab,
+          );
+          savedRevision = revision;
+        } while (!disposed &&
+            identical(store, sessionStore) &&
+            savedRevision != sessionRevision);
+        if (!disposed) super.setState(() => sessionIssue = null);
+      } catch (e) {
+        if (!disposed)
+          super.setState(
+            () => sessionIssue =
+                'Session save failed: $e. Export important changes or retry Save session.',
+          );
+      } finally {
+        if (!disposed) super.setState(() => savingSession = false);
+      }
+    }();
+    saveInFlight = job;
+    try {
+      await job;
+    } finally {
+      saveInFlight = null;
+    }
+    if (throwOnError && sessionIssue != null) throw StateError(sessionIssue!);
+  }
+
+  Future<void> initializeLocal(LocalMusicEngine local) async {
+    await openWorkspace(local.workspaceOrigin);
+    await local.loadSettings();
+    final status = await local.json('/health');
+    if (mounted) {
+      setState(() => health = status);
+      if (selected != null) startAvailabilityChecks(selected!);
+    }
+  }
+
+  Future<void> initializeWindows() async {
+    final saved = await connectionStore.load();
+    if (!mounted) return;
+    if (saved != null) {
+      serverUrl = saved.url;
+      accessToken = saved.token;
+    }
+    if (await connectionStore.usesBackend()) {
+      await restoreConnection();
+    } else {
+      await openWorkspace('windows-local');
+      await useWindowsLocal();
+    }
+  }
+
+  Future<void> useWindowsLocal() async {
+    final next = WindowsEngine();
+    try {
+      await next.loadSettings();
+      final status = await next.json('/health');
+      await openWorkspace(
+        next.workspaceOrigin,
+        beforeCommit: () => connectionStore.selectBackend(false),
+      );
+      if (!mounted) {
+        next.close();
+        return;
+      }
+      retryTimer?.cancel();
+      connectionGeneration++;
+      api?.close();
+      setState(() {
+        api = next;
+        health = status;
+        connectionIssue = null;
+      });
+      attachRecovery();
+      if (selected != null) startAvailabilityChecks(selected!);
+    } catch (_) {
+      next.close();
+      rethrow;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    lifecycle = AppLifecycleListener(
+      onInactive: () => unawaited(flushSession()),
+      onPause: () => unawaited(flushSession()),
+    );
+    unawaited(initializeWindowSession());
     if (Platform.isAndroid) {
       final local = AndroidEngine();
       api = local;
-      local
-          .loadSettings()
-          .then((_) async {
-            final status = await local.json('/health');
-            if (mounted) setState(() => health = status);
-          })
-          .catchError((Object e) {
-            notice('Could not load online settings: $e', error: true);
-          });
+      startupConnection = initializeLocal(local).catchError((Object e) {
+        notice('Could not initialize the local session: $e', error: true);
+      });
+    } else if (Platform.isWindows && widget.autoConnect) {
+      startupConnection = initializeWindows().catchError((Object e) {
+        if (mounted)
+          setState(
+            () => connectionIssue = 'Could not initialize local audio: $e',
+          );
+      });
     } else if (widget.autoConnect) {
       startupConnection = restoreConnection();
     }
@@ -159,6 +442,7 @@ class _StudioState extends State<Studio> {
       if (!mounted || stored == null || api != null || settingsOpen) return;
       serverUrl = stored.url;
       accessToken = stored.token;
+      await openWorkspace(serverUrl);
       retryTimer = Timer.periodic(const Duration(seconds: 15), (_) {
         if (mounted && api == null && !busy && !settingsOpen)
           unawaited(reconnect());
@@ -196,6 +480,8 @@ class _StudioState extends State<Studio> {
         health = status;
         connectionIssue = null;
       });
+      attachRecovery();
+      if (selected != null) startAvailabilityChecks(selected!);
     } catch (_) {
       next.close();
       if (mounted && generation == connectionGeneration)
@@ -210,6 +496,15 @@ class _StudioState extends State<Studio> {
 
   @override
   void dispose() {
+    disposed = true;
+    autosaveTimer?.cancel();
+    lifecycle.dispose();
+    if (Platform.isWindows && widget.persistSessions)
+      windowSession.setMethodCallHandler(null);
+    unawaited(() async {
+      await flushSession();
+      await sessionStore?.close();
+    }());
     retryTimer?.cancel();
     connectionGeneration++;
     api?.close();
@@ -245,6 +540,10 @@ class _StudioState extends State<Studio> {
         error: true,
       );
     } catch (e) {
+      if (e is MissingAudioException) {
+        for (final track in tracks)
+          if (track.id == e.trackId) track.sourceMissing = true;
+      }
       notice(
         e is PlatformException
             ? (e.message ?? 'Audio operation failed.')
@@ -263,6 +562,8 @@ class _StudioState extends State<Studio> {
   }
 
   Future<void> settings() async {
+    await startupConnection;
+    if (!mounted) return;
     connectionGeneration++;
     setState(() => settingsOpen = true);
     try {
@@ -272,15 +573,16 @@ class _StudioState extends State<Studio> {
     }
   }
 
-  Future<void> connectionSettings() async {
-    if (api is AndroidEngine) {
-      await androidSettings();
+  Future<void> connectionSettings({bool forceBackend = false}) async {
+    if (api is LocalMusicEngine && !forceBackend) {
+      await localSettings();
       return;
     }
     final url = TextEditingController(text: serverUrl);
     final token = TextEditingController(text: accessToken);
     String? error;
     bool connecting = false;
+    bool switchToLocal = false;
     final connected = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -326,7 +628,7 @@ class _StudioState extends State<Studio> {
                     const Padding(
                       padding: EdgeInsets.only(top: 12),
                       child: Text(
-                        'Changing servers clears the imported queue. Export any edits first.',
+                        'Each server keeps a separate saved workspace. Switching servers restores that server’s saved session.',
                         style: TextStyle(color: accent),
                       ),
                     ),
@@ -343,6 +645,16 @@ class _StudioState extends State<Studio> {
             ),
           ),
           actions: [
+            if (Platform.isWindows)
+              TextButton(
+                onPressed: connecting
+                    ? null
+                    : () {
+                        switchToLocal = true;
+                        Navigator.pop(dialogContext, false);
+                      },
+                child: const Text('Use on this PC'),
+              ),
             TextButton(
               onPressed: connecting
                   ? null
@@ -405,23 +717,30 @@ class _StudioState extends State<Studio> {
                         final status = await next
                             .json('/health')
                             .timeout(const Duration(seconds: 12));
-                        try {
-                          await connectionStore.save(
-                            BackendConnection(address, token.text.trim()),
-                          );
-                        } catch (_) {
-                          throw ApiException(
-                            'The service responded, but the key could not be saved in protected OS storage. Check the app installation.',
-                          );
-                        }
                         if (!mounted || !dialogContext.mounted) {
                           next.close();
                           return;
                         }
-                        final changed =
-                            api != null &&
-                            (address != serverUrl ||
-                                token.text.trim() != accessToken);
+                        await openWorkspace(
+                          address,
+                          beforeCommit: () async {
+                            try {
+                              await connectionStore.save(
+                                BackendConnection(address, token.text.trim()),
+                              );
+                              if (Platform.isWindows)
+                                await connectionStore.selectBackend(true);
+                            } catch (_) {
+                              throw ApiException(
+                                'The service responded, but the key could not be saved in protected OS storage. Check the app installation.',
+                              );
+                            }
+                          },
+                        );
+                        if (!mounted || !dialogContext.mounted) {
+                          next.close();
+                          return;
+                        }
                         api?.close();
                         setState(() {
                           api = next;
@@ -429,11 +748,10 @@ class _StudioState extends State<Studio> {
                           serverUrl = address;
                           accessToken = token.text.trim();
                           connectionIssue = null;
-                          if (changed) {
-                            tracks.clear();
-                            selected = null;
-                          }
                         });
+                        attachRecovery();
+                        if (selected != null)
+                          startAvailabilityChecks(selected!);
                         Navigator.pop(dialogContext, true);
                       } catch (e) {
                         next.close();
@@ -457,12 +775,14 @@ class _StudioState extends State<Studio> {
       url.dispose();
       token.dispose();
     });
+    if (switchToLocal && mounted)
+      await run('Starting local audio…', useWindowsLocal);
     if (connected == true && mounted)
       notice('Connected. Import an audio file to get started.');
   }
 
-  Future<void> androidSettings() async {
-    final local = api! as AndroidEngine;
+  Future<void> localSettings() async {
+    final local = api! as LocalMusicEngine;
     final key = TextEditingController(text: local.services.acoustIdKey);
     final agent = local.services.userAgent;
     final contact = TextEditingController(
@@ -470,6 +790,7 @@ class _StudioState extends State<Studio> {
     );
     String? error;
     bool saving = false;
+    bool switchToBackend = false;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -483,7 +804,7 @@ class _StudioState extends State<Studio> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   info(
-                    'Audio parsing, manual editing, artwork embedding and fingerprint extraction run on this phone. No Windows app or server is needed.',
+                    'Audio parsing, manual editing, artwork embedding and fingerprint extraction run on this device. No server is needed.',
                   ),
                   const SizedBox(height: 18),
                   TextField(
@@ -508,7 +829,7 @@ class _StudioState extends State<Studio> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Online matching requires Internet access. The complete audio stays on your phone; only fingerprints and lookup text go to music services. These settings are stored locally.',
+                    'Online matching requires Internet access. The complete audio stays on this device; only fingerprints and lookup text go to music services. These settings are stored locally.',
                     style: TextStyle(fontSize: 12, color: muted, height: 1.5),
                   ),
                   if (error != null)
@@ -524,6 +845,16 @@ class _StudioState extends State<Studio> {
             ),
           ),
           actions: [
+            if (Platform.isWindows)
+              TextButton(
+                onPressed: saving
+                    ? null
+                    : () {
+                        switchToBackend = true;
+                        Navigator.pop(dialogContext);
+                      },
+                child: const Text('Use optional backend'),
+              ),
             TextButton(
               onPressed: saving ? null : () => Navigator.pop(dialogContext),
               child: const Text('Cancel'),
@@ -570,6 +901,8 @@ class _StudioState extends State<Studio> {
       key.dispose();
       contact.dispose();
     });
+    if (switchToBackend && mounted)
+      await connectionSettings(forceBackend: true);
   }
 
   void editManually([int page = 0]) {
@@ -701,8 +1034,38 @@ class _StudioState extends State<Studio> {
           continue;
         }
         if (mounted) setState(() => activity = 'Reading ${input.name}…');
-        final track = TrackDraft.fromJson(
-          await api!.upload(input.path, input.name),
+        if (tracks.length >= 50)
+          throw ApiException('A session can contain at most 50 tracks.');
+        final store = sessionStore;
+        if (widget.persistSessions && store == null)
+          throw ApiException(
+            'Open a saved workspace before importing. Check the session error message.',
+          );
+        final staged = await store?.stageAudio(input.path, input.name);
+        Map<String, dynamic> importedData;
+        try {
+          importedData = await api!.upload(
+            staged?.path ?? input.path,
+            input.name,
+          );
+        } catch (_) {
+          if (staged != null) await store!.discard(staged);
+          rethrow;
+        }
+        final runtimeId = importedData['id'] as String;
+        final track = TrackDraft.fromJson({
+          ...importedData,
+          'id': staged?.id ?? runtimeId,
+        });
+        track.sourcePath = staged?.path ?? input.path;
+        track.sourceDigest = staged?.digest;
+        trackEngine.register(
+          track.id,
+          track.sourcePath!,
+          track.filename,
+          runtimeId: runtimeId,
+          size: track.size,
+          digest: track.sourceDigest,
         );
         if (!mounted) return;
         tracks.add(track);
@@ -737,7 +1100,7 @@ class _StudioState extends State<Studio> {
   );
 
   Future<void> identifyTrack(TrackDraft track) async {
-    final result = await api!.json(
+    final result = await trackEngine.json(
       '/tracks/${track.id}/identify',
       method: 'POST',
     );
@@ -757,7 +1120,10 @@ class _StudioState extends State<Studio> {
       return;
     }
     final track = selected!;
-    final result = await api!.json('/search', query: {'q': search.text.trim()});
+    final result = await trackEngine.json(
+      '/search',
+      query: {'q': search.text.trim()},
+    );
     if (!mounted) return;
     setState(() {
       track.candidates = (result['candidates'] as List)
@@ -770,9 +1136,9 @@ class _StudioState extends State<Studio> {
   });
 
   void startAvailabilityChecks(TrackDraft track) {
-    if (selected != track) return;
+    if (selected != track || api == null || track.sourceMissing) return;
     final generation = ++availabilityGeneration;
-    final engine = api!;
+    final engine = trackEngine;
     final entries = track.candidates;
     unawaited(
       checkCandidateAvailability(
@@ -783,7 +1149,7 @@ class _StudioState extends State<Studio> {
             mounted &&
             generation == availabilityGeneration &&
             selected == track &&
-            identical(api, engine) &&
+            identical(recoveringEngine, engine) &&
             tracks.contains(track) &&
             identical(track.candidates, entries),
         changed: () {
@@ -797,7 +1163,7 @@ class _StudioState extends State<Studio> {
     'Fetching metadata${fetchLyrics ? ', lyrics' : ''}${fetchCover ? ' and artwork' : ''}…',
     () async {
       final track = selected!;
-      final result = await api!.json(
+      final result = await trackEngine.json(
         '/tracks/${track.id}/enrich',
         method: 'POST',
         body: {
@@ -833,7 +1199,7 @@ class _StudioState extends State<Studio> {
     () async {
       final track = selected!;
       setState(() => track.selectedCandidate = candidate);
-      final result = await api!.json(
+      final result = await trackEngine.json(
         '/tracks/${track.id}/alternatives',
         method: 'POST',
         body: {
@@ -866,7 +1232,7 @@ class _StudioState extends State<Studio> {
       );
       final safeName = stem.length > 120 ? stem.substring(0, 120) : stem;
       if (kind == 'cover') {
-        final image = await api!.json(
+        final image = await trackEngine.json(
           '/tracks/${track.id}/alternative-cover',
           method: 'POST',
           body: {'collection_id': choice['collection_id']},
@@ -935,7 +1301,7 @@ class _StudioState extends State<Studio> {
 
   Future<void> lyrics() => run('Looking for matching lyrics…', () async {
     final track = selected!;
-    final result = await api!.json(
+    final result = await trackEngine.json(
       '/tracks/${track.id}/lyrics',
       method: 'POST',
       body: track.tags,
@@ -977,8 +1343,8 @@ class _StudioState extends State<Studio> {
 
   Future<void> export() => run('Writing tags to a new copy…', () async {
     final track = selected!;
-    if (api is AndroidEngine) {
-      final saved = await (api! as AndroidEngine).saveExport(
+    if (api is LocalMusicEngine) {
+      final saved = await trackEngine.saveLocalExport(
         track.id,
         track.exportBody(),
         track.exportName,
@@ -991,7 +1357,7 @@ class _StudioState extends State<Studio> {
       notice('Saved ${track.exportName} with your tags, lyrics and artwork.');
       return;
     }
-    final bytes = await api!.export(track.id, track.exportBody());
+    final bytes = await trackEngine.export(track.id, track.exportBody());
     final output = await FilePicker.platform.saveFile(
       dialogTitle: 'Save tagged audio',
       fileName: track.exportName,
@@ -1008,19 +1374,49 @@ class _StudioState extends State<Studio> {
     notice('Saved ${track.exportName} with metadata, lyrics and artwork.');
   });
 
-  Future<void> remove(TrackDraft track) =>
-      run('Removing temporary audio…', () async {
+  Future<void> remove(TrackDraft track) => run(
+    'Removing track from this workspace…',
+    () async {
+      // A disconnected/expired service must not prevent local session cleanup.
+      if (api != null) {
         try {
-          await api!.json('/tracks/${track.id}', method: 'DELETE');
-        } on ApiException catch (e) {
-          if (!e.message.contains('expired')) rethrow;
+          await trackEngine.json('/tracks/${track.id}', method: 'DELETE');
+        } catch (_) {
+          /* Old remote working copies expire independently. */
         }
-        if (!mounted) return;
-        setState(() {
-          tracks.remove(track);
-          selected = tracks.isEmpty ? null : tracks.first;
-        });
-        if (selected != null) select(selected!);
+      }
+      if (!mounted) return;
+      setState(() {
+        tracks.remove(track);
+        selected = tracks.isEmpty ? null : tracks.first;
+        availabilityGeneration++;
+      });
+      if (selected != null) select(selected!);
+      await flushSession();
+    },
+  );
+
+  Future<void> locateOriginal(TrackDraft track) =>
+      run('Locating saved audio…', () async {
+        final store = sessionStore;
+        if (store == null)
+          throw ApiException('The saved workspace is unavailable.');
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: [track.filename.split('.').last.toLowerCase()],
+        );
+        if (result == null || result.files.single.path == null) return;
+        await store.relink(track, result.files.single.path!);
+        recoveringEngine?.register(
+          track.id,
+          track.sourcePath!,
+          track.filename,
+          size: track.size,
+          digest: track.sourceDigest,
+        );
+        if (mounted) setState(() {});
+        await flushSession();
+        notice('Original audio located. Saved edits are ready to use.');
       });
 
   Widget badge(String text, {Color color = accent}) => Container(
@@ -1129,9 +1525,38 @@ class _StudioState extends State<Studio> {
                     ),
                     if (constraints.maxWidth > 650)
                       badge('WINDOWS + ANDROID', color: muted),
+                    if (widget.persistSessions && sessionStore != null)
+                      Tooltip(
+                        message: sessionIssue != null
+                            ? sessionIssue!
+                            : savingSession
+                            ? 'Saving session…'
+                            : savedRevision == sessionRevision
+                            ? 'Session saved on this device'
+                            : 'Unsaved changes',
+                        child: IconButton(
+                          onPressed: () async {
+                            await flushSession();
+                            if (sessionIssue == null)
+                              notice('Session saved on this device.');
+                          },
+                          icon: Icon(
+                            sessionIssue != null
+                                ? Icons.error_outline
+                                : savingSession ||
+                                      savedRevision != sessionRevision
+                                ? Icons.save_outlined
+                                : Icons.check_circle_outline,
+                            color: sessionIssue != null
+                                ? const Color(0xFFFFA9B8)
+                                : mint,
+                          ),
+                          tooltip: 'Save session',
+                        ),
+                      ),
                     const SizedBox(width: 12),
                     Tooltip(
-                      message: Platform.isAndroid
+                      message: api is LocalMusicEngine
                           ? 'On-device processing / online settings'
                           : 'Server connection',
                       child: OutlinedButton.icon(
@@ -1144,8 +1569,10 @@ class _StudioState extends State<Studio> {
                           color: api == null ? muted : mint,
                         ),
                         label: Text(
-                          Platform.isAndroid
-                              ? 'On device'
+                          api is LocalMusicEngine
+                              ? (Platform.isWindows
+                                    ? 'On this PC'
+                                    : 'On device')
                               : api == null
                               ? (reconnecting ? 'Connecting…' : 'Connect')
                               : 'Connected',
@@ -1202,20 +1629,29 @@ class _StudioState extends State<Studio> {
                         ],
                       ),
                       const SizedBox(height: 24),
+                      if (sessionIssue != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: info(sessionIssue!),
+                        ),
+                      for (final message in sessionMessages)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: info(message),
+                        ),
                       if (connectionIssue != null)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 16),
                           child: info(connectionIssue!),
                         ),
-                      if (!Platform.isAndroid &&
-                          health != null &&
+                      if (health != null &&
                           (health!['acoustid_configured'] != true ||
                               health!['musicbrainz_configured'] != true))
                         Padding(
                           padding: const EdgeInsets.only(bottom: 18),
                           child: info(
                             '${health!['acoustid_configured'] != true ? 'Fingerprint matching needs the free AcoustID application key. ' : ''}'
-                            '${health!['musicbrainz_configured'] != true ? 'Set MUSIC_USER_AGENT on the server for metadata search. ' : ''}'
+                            '${health!['musicbrainz_configured'] != true ? (api is LocalMusicEngine ? 'Add a contact email or project URL in online settings for metadata search. ' : 'Set MUSIC_USER_AGENT on the server for metadata search. ') : ''}'
                             'Manual editing and export are available.',
                           ),
                         ),
@@ -1749,6 +2185,18 @@ class _StudioState extends State<Studio> {
             style: const TextStyle(color: muted, fontSize: 12),
             overflow: TextOverflow.ellipsis,
           ),
+          if (track.sourceMissing) ...[
+            const SizedBox(height: 12),
+            info(
+              'Working audio is missing or changed. Your draft was preserved. Locate the original file to resume processing.',
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: busy ? null : () => locateOriginal(track),
+              icon: const Icon(Icons.find_in_page_outlined),
+              label: const Text('Locate original'),
+            ),
+          ],
           const SizedBox(height: 18),
           SegmentedButton<int>(
             segments: const [

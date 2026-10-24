@@ -1,6 +1,7 @@
 # Native audio dependencies
 
-These complete source archives are built into Android's `libresonance_audio.so`.
+These complete source archives are built into Android's `libresonance_audio.so`
+and Windows' `resonance_desktop.exe` helper.
 Their original license and copyright files are inside each archive. Runtime
 recognition uses Android's own media decoders, not a desktop executable.
 
@@ -15,3 +16,23 @@ notices. CMake verifies every archive using the SHA-256 in CMakeLists.txt. Inclu
 these source archives and this project's source with distributed builds to make
 the corresponding native code available. This repository's GPL-3.0-or-later
 license remains applicable to Resonance; dependencies keep their own licenses.
+
+## Windows decoder
+
+Windows builds bundle Gyan's FFmpeg 9.0.2 essentials decoder, fetched at build
+time from `https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip`.
+The pinned archive SHA-256 is
+`60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba`.
+The build preserves the archive's non-executable documentation/license files
+and records its version, source link and checksum under `tools/licenses/`.
+Only `ffmpeg.exe` is used; this is a GPLv3 build. It decodes audio/cover images;
+TagLib writes the output without re-encoding the audio stream. Android does not
+bundle or use this executable.
+
+Build information: https://www.gyan.dev/ffmpeg/builds/ and
+https://github.com/GyanD/codexffmpeg/releases/tag/9.0.2 .
+Upstream FFmpeg source revision: https://github.com/FFmpeg/FFmpeg/tree/946fcce07b .
+Binary distributors must preserve the included notices and meet the bundled
+dependencies' source/relinking obligations. The FFmpeg binary/source archive is
+not part of this source-only ZIP; the preparation script downloads its verified
+binary archive on the Windows build machine.

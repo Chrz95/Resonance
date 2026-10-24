@@ -9,6 +9,18 @@ void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
   test(
+    'Windows defaults to local processing and remembers an explicit backend choice',
+    () async {
+      const store = ConnectionStore();
+      expect(await store.usesBackend(), false);
+      await store.selectBackend(true);
+      expect(await store.usesBackend(), true);
+      await store.selectBackend(false);
+      expect(await store.usesBackend(), false);
+    },
+  );
+
+  test(
     'saved URL and secret are restored together and can be forgotten',
     () async {
       const store = ConnectionStore();

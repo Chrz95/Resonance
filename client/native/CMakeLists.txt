@@ -40,6 +40,7 @@ add_subdirectory("${chromaprint_SOURCE_DIR}" "${chromaprint_BINARY_DIR}")
 
 add_library(resonance_core STATIC audio_core.cpp)
 target_link_libraries(resonance_core PUBLIC tag chromaprint)
+target_compile_definitions(resonance_core PUBLIC CHROMAPRINT_NODLL)
 target_include_directories(resonance_core PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${taglib_SOURCE_DIR}/taglib" "${taglib_SOURCE_DIR}/taglib/toolkit"
@@ -51,6 +52,8 @@ if(ANDROID)
   # Compatible ELF alignment on devices using 16 KiB memory pages.
   target_link_options(resonance_audio PRIVATE "-Wl,-z,max-page-size=16384")
 else()
+  add_executable(resonance_desktop desktop_main.cpp)
+  target_link_libraries(resonance_desktop PRIVATE resonance_core)
   add_executable(resonance_native_test tests/audio_test.cpp)
   target_link_libraries(resonance_native_test PRIVATE resonance_core)
 endif()

@@ -16,7 +16,12 @@ static const std::map<std::string, const char *> keys = {
 };
 
 AudioData read(const std::string &path) {
+#ifdef _WIN32
+  auto widePath = String(path, String::UTF8).toWString();
+  FileRef file(widePath.c_str(), true, AudioProperties::Accurate);
+#else
   FileRef file(path.c_str(), true, AudioProperties::Accurate);
+#endif
   if(file.isNull() || !file.file()->isValid() || !file.audioProperties())
     throw std::runtime_error("Invalid or unsupported audio file.");
   AudioData result;
@@ -45,7 +50,12 @@ AudioData read(const std::string &path) {
 
 void write(const std::string &path, const Tags &tags, const std::string &coverAction,
            const std::vector<uint8_t> &jpeg) {
+#ifdef _WIN32
+  auto widePath = String(path, String::UTF8).toWString();
+  FileRef file(widePath.c_str());
+#else
   FileRef file(path.c_str());
+#endif
   if(file.isNull() || !file.file()->isValid()) throw std::runtime_error("Invalid audio container.");
   auto props = file.properties();
   for(const auto &[field, key] : keys) {

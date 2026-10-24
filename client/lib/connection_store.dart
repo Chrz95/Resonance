@@ -35,6 +35,11 @@ class ConnectionStore {
   }) : _storage = storage;
   final FlutterSecureStorage _storage;
   static const key = 'resonance.backend.connection.v1';
+  static const modeKey = 'resonance.windows.processing-mode.v1';
+  Future<bool> usesBackend() async =>
+      await _storage.read(key: modeKey) == 'backend';
+  Future<void> selectBackend(bool enabled) =>
+      _storage.write(key: modeKey, value: enabled ? 'backend' : 'local');
   Future<BackendConnection?> load() async {
     final text = await _storage.read(key: key);
     if (text == null) return null;
@@ -49,5 +54,8 @@ class ConnectionStore {
     key: key,
     value: jsonEncode({'url': connection.url, 'token': connection.token}),
   );
-  Future<void> forget() => _storage.delete(key: key);
+  Future<void> forget() async {
+    await _storage.delete(key: key);
+    await _storage.delete(key: modeKey);
+  }
 }

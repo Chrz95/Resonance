@@ -79,7 +79,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun track(call: MethodCall): File = tracks[call.argument<String>("id")]
+    private fun track(call: MethodCall): File = tracks[call.argument<String>("id")]?.takeIf { it.isFile }
         ?: error("This audio session expired. Import the file again.")
 
     private fun dispatch(call: MethodCall, root: File): Any? {
@@ -94,6 +94,7 @@ class MainActivity : FlutterActivity() {
                 null
             }
             "import" -> {
+                tracks.entries.removeAll { !it.value.isFile }
                 val source = File(requireNotNull(call.argument<String>("path")))
                 check(source.isFile && source.length() in 1..limit) { "Choose an audio file up to 120 MiB." }
                 check(tracks.size < 50 && tracks.values.sumOf { it.length() } + source.length() <= 2L * 1024L * 1024L * 1024L) { "Local session storage is full. Remove an imported file first." }

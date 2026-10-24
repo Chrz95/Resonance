@@ -2,7 +2,11 @@
 """Generate SDK-owned Windows/Android runners without overwriting application code."""
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from windows_session import install_windows_session
+from windows_audio import install_windows_audio
+from windows_tools import prepare_windows_tools
 
 
 def main():
@@ -43,6 +47,10 @@ def main():
         content = content[:content.index(begin)].rstrip() + "\n"
     content += "\n" + begin + "\n" + (native_sources / "native.gradle.kts").read_text() + "\n// END RESONANCE NATIVE AUDIO\n"
     gradle.write_text(content)
+    install_windows_session(client)
+    install_windows_audio(client)
+    if sys.platform == 'win32':
+        prepare_windows_tools(client)
     subprocess.run([flutter, "pub", "get"], cwd=client, check=True)
     print("Ready. Run flutter analyze, flutter test, and flutter run -d windows (or an Android device) in client/.")
 

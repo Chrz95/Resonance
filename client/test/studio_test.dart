@@ -13,7 +13,11 @@ void main() {
     for (final size in [const Size(360, 800), const Size(1440, 960)]) {
       tester.view.physicalSize = size;
       await tester.pumpWidget(
-        const ResonanceApp(enableDesktopDrop: false, autoConnect: false),
+        const ResonanceApp(
+          enableDesktopDrop: false,
+          autoConnect: false,
+          persistSessions: false,
+        ),
       );
       await tester.pumpAndSettle();
       expect(find.text('Choose music files'), findsOneWidget);

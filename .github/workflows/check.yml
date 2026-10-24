@@ -12,9 +12,13 @@ jobs:
       - run: pip install -r backend/requirements-dev.txt
       - run: python -m pytest tests -q
         working-directory: backend
+      - run: python -m pytest tools/tests -q
       - run: cmake -S client/native -B native-build -DCMAKE_BUILD_TYPE=Release
-      - run: cmake --build native-build --target resonance_native_test --parallel 4
+      - run: cmake --build native-build --target resonance_native_test resonance_desktop --parallel 4
       - run: python tools/test_native.py --binary native-build/resonance_native_test
+      - run: python -m pytest tools/tests/test_desktop_audio.py -q
+        env:
+          RESONANCE_DESKTOP_BINARY: native-build/resonance_desktop
   native:
     strategy:
       matrix:
@@ -45,6 +49,12 @@ jobs:
         working-directory: client
       - run: flutter build ${{ matrix.target }}
         working-directory: client
+      - if: runner.os == 'Windows'
+        run: |
+          python -m pip install pytest Pillow
+          $env:PATH = "$env:GITHUB_WORKSPACE/client/build/windows/x64/runner/Release/tools;$env:PATH"
+          $env:RESONANCE_DESKTOP_BINARY = "$env:GITHUB_WORKSPACE/client/build/windows/x64/runner/Release/tools/resonance_desktop.exe"
+          python -m pytest tools/tests -q
       - uses: actions/upload-artifact@v4
         with:
           name: resonance-${{ matrix.os }}

@@ -7,8 +7,9 @@ import 'package:http/http.dart' as http;
 import 'engine.dart';
 
 class ApiException implements Exception {
-  ApiException(this.message);
+  ApiException(this.message, {this.statusCode});
   final String message;
+  final int? statusCode;
   @override
   String toString() => message;
 }
@@ -36,7 +37,7 @@ class ResonanceApi implements MusicEngine {
     } catch (_) {
       /* A proxy may return HTML rather than JSON. */
     }
-    throw ApiException(message);
+    throw ApiException(message, statusCode: response.statusCode);
   }
 
   Future<Map<String, dynamic>> json(
