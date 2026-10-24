@@ -1,0 +1,74 @@
+name: Validate and build
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg libchromaprint-tools
+      - run: pip install -r backend/requirements-dev.txt
+      - run: python -m pytest tests -q
+        working-directory: backend
+      - run: cmake -S client/native -B native-build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build native-build --target resonance_native_test --parallel 4
+      - run: python tools/test_native.py --binary native-build/resonance_native_test
+  native:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows
+          - os: ubuntu-latest
+            target: apk --debug
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - if: runner.os == 'Linux'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "cmake;3.22.1"'
+      - run: python tools/bootstrap_client.py
+      - run: dart format lib test
+        working-directory: client
+      - run: flutter analyze --no-fatal-infos
+        working-directory: client
+      - run: flutter test
+        working-directory: client
+      - run: flutter build ${{ matrix.target }}
+        working-directory: client
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resonance-${{ matrix.os }}
+          path: |
+            client/build/windows/x64/runner/Release/
+            client/build/app/outputs/flutter-apk/app-debug.apk
+  android-device:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "cmake;3.22.1"'
+      - run: python tools/bootstrap_client.py
+      - run: flutter build apk --debug
+        working-directory: client
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          script: cd client/android && ./gradlew connectedDebugAndroidTest

@@ -1,0 +1,17 @@
+services:
+  music-service:
+    build: ./backend
+    ports:
+      - "${RESONANCE_BIND:-127.0.0.1}:8765:8765"
+    environment:
+      RESONANCE_TOKEN: "${RESONANCE_TOKEN:?Set a server access token in .env}"
+      ACOUSTID_API_KEY: "${ACOUSTID_API_KEY:-}"
+      MUSIC_USER_AGENT: "${MUSIC_USER_AGENT:-}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=3g,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
