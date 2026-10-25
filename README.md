@@ -1,98 +1,102 @@
-# Resonance 1.6.0
+# Resonance
+
+**Recognize your music. Complete its tags. Make it yours.**
+
+A Flutter music tagger for **Windows and Android**. Identify songs from their audio fingerprints, find metadata, lyrics and album artwork, then review and save a tagged copy—all in one interface.
+
+Android runs independently on your phone. Windows runs locally on your PC. Neither needs a companion app or a hosted backend for everyday use.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q1J229F1AG)
 
-This update adds batch recognition controls: selected/all songs, progress, pause/resume, cancel, skip and retry. Earlier standalone Windows/Android engines and saved workspaces are retained. See [BATCH_UPDATE.md](BATCH_UPDATE.md) for usage and limits.
+[Features](#what-you-can-do) · [Getting started](#getting-started) · [Build Android](#build-android) · [Build Windows](#build-standalone-windows) · [Privacy](#privacy-and-free-services)
 
-To update, replace the project files while keeping `.env` if you use the optional backend. Run `python tools/bootstrap_client.py`, open `client/`, and rebuild with `flutter build windows --release` or `flutter build apk --debug`. On Windows, bootstrap downloads the pinned FFmpeg decoder and installs the native-helper build rules. Keep the complete Windows build folder together. Updating only the backend does not update the app UI.
+> **Current source version: 1.6.0.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
 
-A Flutter music tagger for **standalone Windows and Android**. Recognize a song by its audio fingerprint or existing tags, review matches, fetch lyrics and artwork, and save a tagged audio copy. All metadata, lyrics and covers can also be edited manually without identifying the song first.
+## What you can do
 
-**Android does not use the Windows application, Python service, a PC address, or a server token.** It bundles TagLib and Chromaprint and uses Android’s own audio decoder and document picker. Audio parsing, manual editing, fingerprint extraction and tag writing run on the phone. Online recognition and lookup need Internet access, not a desktop companion.
+### Identify songs and choose the right release
 
-Windows bundles a portable TagLib/Chromaprint helper and FFmpeg decoder. Both apps contact the free music services directly for online lookup. The Python service is an optional Windows processing mode. This source package includes build scripts and CI; it does not include a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for checks actually executed.
+Generate a Chromaprint audio fingerprint locally and look up matches through AcoustID, or search MusicBrainz using existing song information. Review candidate recordings and release editions before applying a match.
 
-## Saved sessions and recovery
+Each candidate displays **lyrics** and **cover** availability badges. See which matches have content available, which checks are still running, and which sources could not be reached. Hover or long-press a badge for details. Badges describe online availability, rather than content already embedded in your file.
 
-Edits autosave after a short pause, when the app goes into the background, and before a normal Windows window close. The top **Save session** button saves immediately; its icon and tooltip show pending changes, progress or a save error. Session saving is separate from **Save tagged copy**: only exporting produces the finished audio file you can use elsewhere.
+### Edit every detail yourself
 
-- Sessions retain original tags, edited tags, both lyric fields, original/replacement artwork, fingerprints, candidate results, selected candidate, selected track and editor tab.
-- The app keeps private working audio in application-support storage. Moving the originally selected file does not break the saved session. Windows has a local workspace and a separate workspace for each backend URL; Android has its own on-device workspace and remains fully independent.
-- After a restart, temporary backend/native IDs are discarded. The first processing or export operation re-imports the saved source as needed. A backend “session expired” response triggers one re-import and retry. Existing edits and candidate selections remain in the draft. Provider errors such as “lyrics not found” do not trigger another upload.
-- In optional backend mode, offline drafts remain viewable and manually editable; recognition/export need that backend to be reachable. In local Windows mode and on Android, manual editing and export work without a backend or Internet connection.
-- If a working audio copy is missing or changed, **Locate original** accepts a byte-identical original file, checked by SHA-256. Saved text edits remain available. Missing/damaged artwork shows a message and preserves text; choose the replacement cover again.
-- Snapshots are replaced atomically with a previous complete snapshot kept for recovery. A damaged primary manifest falls back to a valid backup. If no snapshot is usable, existing files are preserved and the app reports the problem instead of replacing the session with an empty one. Only one app process should open a given workspace at a time.
+Recognition is optional. Open a song and edit its title, artist, album, album artist, release date, genre, track/disc numbers and MusicBrainz IDs directly.
 
-The queue is limited to 50 songs, 120 MiB per song, and approximately 2 GiB of saved working audio per workspace. The previous snapshot can temporarily retain removed audio/artwork. A process killed during the short autosave delay can lose the latest unsaved keystrokes; use **Save session** before force-stopping the app. Clearing app data or uninstalling can remove saved sessions. Save tagged copies separately for long-term use. Session files contain song information and audio, but no backend access token; credentials remain in protected OS storage.
+- **Lyrics:** type or paste plain or timed lyrics, import UTF-8 `.txt` or `.lrc` files, remove lyrics, or export a timed `.lrc` sidecar.
+- **Artwork:** keep the embedded cover, replace it with a local JPEG, PNG or WebP image, or remove it.
+- **Export:** save the finished draft as a new tagged audio copy without re-encoding the audio. The original file stays unchanged.
 
-Re-run `python tools/bootstrap_client.py` when upgrading. It installs the Windows close-time checkpoint, native helper, decoder packaging rules and Flutter dependencies.
+Manual editing and export work offline on Android and in local Windows mode, with no account or API key.
 
-## Remembered connection and automatic reconnect
+### Find lyrics and covers from other sources
 
-Windows defaults to local processing. To use the optional service, open **On this PC → Use optional backend**, then enter the backend URL and `RESONANCE_TOKEN`. A successful connection saves both using `flutter_secure_storage` and protected OS credential storage. The selected processing mode is remembered. In backend mode the app reconnects at startup and retries every 15 seconds if needed. This does not launch Docker or install a Windows service.
+Use **Other lyrics** or **Other covers** on a selected candidate to search alternatives. Preview the song/version, artwork and source before choosing what to use.
 
-Use **Connected/Connect** to change the URL/key, or **Use on this PC** to return to local processing. **Forget saved connection** deletes the stored connection and restores the default local mode for the next launch; the current connection stays usable until closing. Existing backend workspaces are retained when switching modes. On upgrading from 1.4, the app defaults to local mode and keeps the previous URL/key available in optional backend settings.
+Lyrics come from LRCLIB and lyrics.ovh; alternative artwork comes from the iTunes catalog alongside release artwork from Cover Art Archive. Load a result into the editor or download a separate image, `.txt` or `.lrc` file. Results are never silently applied, and missing content leaves your existing draft intact.
 
-## Drag-and-drop songs
+### Work through a collection
 
-On desktop, drop one or more MP3, FLAC, M4A, Ogg Vorbis or Opus files anywhere in the studio. The drop target highlights while hovering. Supported, readable files are imported and identified sequentially; unsupported files, folders, empty files and files over 120 MiB are rejected with a message. Local Windows mode handles the drop without a service connection; optional backend mode uses its saved connection.
+Import several songs and recognize selected tracks or the whole queue. Batch controls include progress, **pause/resume**, **cancel remaining**, **skip**, and **retry failed or unfinished tracks**. Review and export each song individually; batch recognition does not automatically apply matches or write files.
 
-A dropped file is kept in the queue even when recognition fails, so it can still be edited manually. Ordinary file-picker imports remain available for manual editing without automatically starting recognition. Android continues to use its native file picker; Android OS drag-and-drop is not enabled by this implementation.
+On Windows, drag supported songs into the app to import and identify them sequentially. A song stays available for manual editing if recognition fails. File-picker imports are available on both platforms and let you start editing without automatic recognition.
 
-## Covers and lyrics from other sources
+### Pick up where you left off
 
-Each candidate has **Other covers** and **Other lyrics** buttons. Clicking either selects/highlights that candidate and searches alternatives using its title, artist and album. Results are shown for review before any draft content is changed.
+Resonance saves your workspace: working audio, tag edits, plain and timed lyrics, artwork, fingerprints, candidate results, selections and batch status. Autosave runs after edits and at lifecycle checkpoints; **Save session** saves immediately.
 
-- **Other covers:** searches the public iTunes Search API, filters by artist, removes duplicate album IDs and prioritizes the candidate’s album. You can preview the album/track/source, choose **Use cover** to load it into the editor, or **Save image** to download a separate JPEG.
-- **Other lyrics:** queries lyrics.ovh and LRCLIB’s version search. The app filters LRCLIB results by title and artist, shows the album/version and previews the lyrics. **Use lyrics** replaces the draft’s plain/timed lyric content; **Save lyrics** downloads a `.txt` or `.lrc` file.
-- These actions change only the chosen content. Check the metadata editor before saving the audio file. They never silently choose a result or overwrite the original audio.
-- If a source is unavailable, other lyric results remain usable and the app shows the source error. Coverage is not guaranteed. Successfully obtained alternatives also contribute to that candidate’s availability badges.
+Private working copies let you reopen a session even if the original file has moved. Recovery snapshots help restore interrupted sessions, and **Locate original** can reconnect a missing working copy to a byte-identical file. Interrupted batch work can be retried after reopening.
 
-The APIs are accessed directly in local Windows mode and on Android, or through the service in optional backend mode. Cover downloads resolve a selected numeric album ID through iTunes; the service does not accept arbitrary image URLs. Only HTTPS artwork on `mzstatic.com` hosts is accepted, image redirects are not followed, and images are bounded to 5 MiB before normalization. Larger artwork is attempted with a fallback to the supplied thumbnail. The source is recorded when you load content into the editor.
+**Save session** preserves work inside Resonance. **Save tagged copy** creates the finished audio file for your music library. Export copies separately before clearing app data or uninstalling.
 
-The Windows service adds `POST /tracks/{id}/alternatives` (kind/title/artist/album) and `POST /tracks/{id}/alternative-cover` (collection_id). No additional API key is required for these providers. Artwork and lyric rights remain with their respective owners; access to a public lookup API does not grant redistribution rights.
+## Windows and Android, each fully functional
 
-## Candidate availability badges
+| Capability | Windows | Android |
+|---|---|---|
+| Local parsing, fingerprinting and tag writing | Yes | Yes |
+| Manual tags, lyrics and artwork editing offline | Yes | Yes |
+| Online recognition, metadata and content lookup | Yes | Yes |
+| Batch recognition and saved workspaces | Yes | Yes |
+| Import audio | File picker and drag-and-drop | Native document picker |
+| Export tagged copies | Local destination | Android document destination |
+| Companion app or backend required | No | No |
+| Optional Python backend processing | Available | Not required or used |
 
-Each candidate has two badges, updated sequentially in the background so recognition results and editing remain usable:
+Windows uses a bundled TagLib/Chromaprint helper and FFmpeg decoder. Android bundles TagLib and Chromaprint and uses its own media decoder. The finished standalone apps do not need Python or Docker installed.
 
-| Badge | Meaning |
-|---|---|
-| Lyrics ✓ | LRCLIB supplied nonempty plain or timed lyrics matching this candidate’s title, artist, album and duration where known. |
-| Cover ✓ | Cover Art Archive confirmed a front-cover thumbnail for this specific release. |
-| No lyrics / No cover | A completed lookup found no content. A candidate without a selected release cannot supply release artwork. |
-| Lyrics … / Cover … | A check is queued or in progress. |
-| Lyrics ? / Cover ? | Availability could not be confirmed, for example because the service is offline or rate limited. |
+## Getting started
 
-Hover or long-press a badge for details. Instrumental tracks are identified in the lyric tooltip. These badges describe online lookup availability, not the original file’s embedded content. The Fetch lyrics/Fetch cover options still control what gets loaded when you choose Use match; the availability checks are independent of those options. Selecting a candidate and exporting still require review.
+1. Build the app for your platform using the instructions below.
+2. Import songs with the file picker, or drop them into the Windows app.
+3. Open **On this PC** or **On device** to configure online lookup, if wanted.
+4. Choose **Identify audio**, search by metadata, or select **Edit manually — no match needed**.
+5. Review a candidate, fetch lyrics/artwork, and make any edits.
+6. Choose **Save tagged copy** and select a destination.
 
-Checks use the candidate recording’s duration when known and otherwise the imported file duration. Artwork is checked with a HEAD request following redirects, rather than downloading a complete image for every candidate. Successful JSON lookups and positive/negative artwork checks are reused for 15 minutes. Transient failures stay unknown. Background checks are focused on the selected track; results for changed selections, removed tracks, replaced candidate lists or changed connections are ignored. Android contacts the same public services directly without a PC.
+For audio recognition, register a free **AcoustID application key** at <https://acoustid.org/new-application>. Use an application key, not a personal submission key. MusicBrainz lookup requires a contact email or project URL in the application's user-agent settings. Manual editing and export require neither.
 
-The Windows service exposes `POST /tracks/{id}/availability` with candidate `title`, `artist`, `album`, optional release UUID and optional duration. Its response includes nullable `has_lyrics`/`has_cover`, an `instrumental` flag and warnings. `/health` reports version `1.6.0` and `candidate_availability: true` so the running service can be checked after rebuilding.
+Settings are remembered on the device. Android uses private preferences; Windows uses protected credential storage. Developer defaults can also be supplied with `--dart-define=ACOUSTID_API_KEY=...` and `--dart-define=MUSIC_USER_AGENT=...` when building.
 
-## Manual editing
+## Supported files and practical limits
 
-1. Import an MP3, FLAC, M4A, Ogg Vorbis or Opus file.
-2. Choose **Edit manually — no match needed**.
-3. In **Tags**, change title, artist, album, album artist, release date, genre, track/disc numbers or MusicBrainz IDs.
-4. In **Lyrics**, type or paste plain/timed lyrics, or import a UTF-8 `.txt` or `.lrc` file. Blank a field to remove those lyrics. Timed lyrics can also be exported as an `.lrc` sidecar.
-5. In **Cover**, choose a local JPEG, PNG or WebP image, remove the embedded artwork, or keep the original.
-6. Choose **Save tagged copy** and select the destination. Original audio packets are not re-encoded. Reset restores the imported values.
+**MP3, FLAC, M4A, Ogg Vorbis and Opus** support metadata, embedded artwork and lyrics. Timed lyrics use format-specific tags; player compatibility varies, so `.lrc` export is available. Unknown metadata and keep-original artwork are retained.
 
-On Android and in local Windows mode, all these steps work **offline**, with no API key, account or service setup. Imported files are private working copies. Export writes the current draft into a fresh copy. Android’s Storage Access Framework streams the output to your selected document URI, avoiding large method-channel audio buffers. Storage and microphone permissions are not requested.
+- Up to **50 songs** per workspace, **120 MiB per song**, and approximately **2 GiB** of saved working audio.
+- Replacement cover files up to **5 MiB**; artwork is normalized for embedding.
+- Windows 10/11 x64 and Android API 24+ are the supported targets.
+- WAV, raw AAC, video containers and DRM-protected audio are unsupported. Android decoding depends on the codecs available on the device.
+- Online matching and content availability depend on the song, release and provider. An Internet connection is needed for those lookups.
 
-## On-device recognition and lookup
+Recognition decodes up to 120 seconds locally. Online requests are throttled and cached, and service cooldowns are honored. See [BATCH_UPDATE.md](BATCH_UPDATE.md) for batch usage and limitations.
 
-The top **On device** (Android) or **On this PC** (Windows) button opens online-service settings:
+## Optional backend and remembered connections
 
-- **AcoustID application key:** register a free application at <https://acoustid.org/new-application> for audio matching. This is an application key, not a personal submission key. Leave it blank to use manual editing or metadata search; fingerprint extraction still works locally.
-- **MusicBrainz contact email or project URL:** used in the required application user-agent string. It costs nothing and needs no API account.
+Windows defaults to local processing. If you prefer the Python service, choose **On this PC → Use optional backend**, enter its URL and `RESONANCE_TOKEN`, and connect. Successful credentials are saved in protected OS storage; the app remembers the mode, reconnects at startup and retries while disconnected.
 
-These settings are saved in Android’s private preferences or Windows protected credential storage. You can also supply developer defaults using `--dart-define=ACOUSTID_API_KEY=...` and `--dart-define=MUSIC_USER_AGENT=...` when building. Application keys identify the application; they are not user-account passwords.
+Use **Use on this PC** to return to local processing or **Forget saved connection** to remove saved credentials. Workspaces are kept separately for local processing and each backend URL. Offline backend drafts remain editable, but processing and export in that mode need the service. Reconnection does not start Docker or install a service.
 
-Choose **Identify audio** to decode up to 120 seconds on the device, generate a Chromaprint fingerprint and send only that fingerprint and duration to AcoustID. Or search MusicBrainz directly by name. Choose a recording/release candidate to fetch its tags, lyrics and cover. Review everything before saving. A recording can belong to several release editions; the user chooses the release.
-
-Direct HTTPS clients contact AcoustID, MusicBrainz, LRCLIB and Cover Art Archive. MusicBrainz requests are serialized at least 1.1 seconds apart; other lookups are throttled, JSON results are cached for 15 minutes, and Retry-After cooldowns are honored. Unavailable lyrics/artwork keep existing content and display a notice. Recognition coverage is not guaranteed.
+Android remains fully independent of this optional backend.
 
 ## Build Android
 
