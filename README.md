@@ -1,5 +1,7 @@
 # Resonance 1.6.0
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q1J229F1AG)
+
 This update adds batch recognition controls: selected/all songs, progress, pause/resume, cancel, skip and retry. Earlier standalone Windows/Android engines and saved workspaces are retained. See [BATCH_UPDATE.md](BATCH_UPDATE.md) for usage and limits.
 
 To update, replace the project files while keeping `.env` if you use the optional backend. Run `python tools/bootstrap_client.py`, open `client/`, and rebuild with `flutter build windows --release` or `flutter build apk --debug`. On Windows, bootstrap downloads the pinned FFmpeg decoder and installs the native-helper build rules. Keep the complete Windows build folder together. Updating only the backend does not update the app UI.
