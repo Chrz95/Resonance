@@ -84,7 +84,7 @@ class LocalMusicEngine implements MusicEngine {
     if (path == '/health')
       return {
         'status': 'ok',
-        'version': '1.5.0',
+        'version': '1.6.0',
         'alternative_sources': true,
         'candidate_availability': true,
         'on_device': true,

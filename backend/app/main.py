@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI):
         await app.state.providers.close()
 
 
-app = FastAPI(title="Resonance", version="1.3.0", lifespan=lifespan,
+app = FastAPI(title="Resonance", version="1.6.0", lifespan=lifespan,
               dependencies=[Depends(authenticated)])
 
 
@@ -119,7 +119,7 @@ def track_for(id: UUID) -> Track:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.3.0", "candidate_availability": True, "alternative_sources": True,
+    return {"status": "ok", "version": "1.6.0", "candidate_availability": True, "alternative_sources": True, "recognition_lookup_status": True,
             "fingerprint_tool": bool(shutil.which("fpcalc") or shutil.which("ffmpeg")),
             "acoustid_configured": bool(app.state.providers.key),
             "musicbrainz_configured": bool(app.state.providers.user_agent),

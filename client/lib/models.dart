@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'recognition_queue.dart';
 
 const tagNames = <String>[
   'title',
@@ -37,6 +38,7 @@ class TrackDraft {
   String? sourcePath;
   String? sourceDigest;
   bool sourceMissing = false;
+  RecognitionRecord recognition = RecognitionRecord();
   final Map<String, String> original;
   Map<String, String> tags;
   final Uint8List? originalCover;
@@ -97,6 +99,7 @@ class TrackDraft {
     'notices': List<String>.of(notices),
     'sources': List<String>.of(sources),
     'exported': exported,
+    'recognition': recognition.toJson(),
   };
 
   static TrackDraft restore(
@@ -158,6 +161,7 @@ class TrackDraft {
     draft.notices = (data['notices'] as List? ?? []).cast<String>();
     draft.sources = (data['sources'] as List? ?? []).cast<String>();
     draft.exported = data['exported'] == true;
+    draft.recognition = RecognitionRecord.restore(data['recognition']);
     return draft;
   }
 }

@@ -182,7 +182,7 @@ class Providers:
         fp = await self.fingerprint(path)
         signature = hashlib.sha256(fp.encode()).hexdigest()
         if not self.key:
-            return {"signature": signature, "candidates": [], "warnings": [
+            return {"signature": signature, "lookup_performed": False, "candidates": [], "warnings": [
                 "Fingerprint extracted. Set the free ACOUSTID_API_KEY on the server to match it, or use metadata search."]}
         data = await self.request_json("https://api.acoustid.org/v2/lookup", data={
             "client": self.key, "duration": str(round(duration)), "fingerprint": fp,
@@ -197,7 +197,7 @@ class Providers:
                 if key not in seen:
                     result.append(candidate)
                     seen.add(key)
-        return {"signature": signature, "candidates": result[:24], "warnings": [] if result else [
+        return {"signature": signature, "lookup_performed": True, "candidates": result[:24], "warnings": [] if result else [
             "No fingerprint match found. Try searching by title and artist."]}
 
     async def search(self, query: str):

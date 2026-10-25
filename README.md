@@ -1,6 +1,6 @@
-# Resonance 1.5.0
+# Resonance 1.6.0
 
-This update adds **standalone Windows processing**, the second roadmap priority. Windows starts in **On this PC** mode: import, edit, fingerprint and export without Docker, Python, a server address or a backend token. Android remains standalone. Persistent sessions, automatic recovery, drag-and-drop, alternate-source downloads, availability badges and the AcoustID date fix are retained. Advanced batch controls remain future work.
+This update adds batch recognition controls: selected/all songs, progress, pause/resume, cancel, skip and retry. Earlier standalone Windows/Android engines and saved workspaces are retained. See [BATCH_UPDATE.md](BATCH_UPDATE.md) for usage and limits.
 
 To update, replace the project files while keeping `.env` if you use the optional backend. Run `python tools/bootstrap_client.py`, open `client/`, and rebuild with `flutter build windows --release` or `flutter build apk --debug`. On Windows, bootstrap downloads the pinned FFmpeg decoder and installs the native-helper build rules. Keep the complete Windows build folder together. Updating only the backend does not update the app UI.
 
@@ -66,7 +66,7 @@ Hover or long-press a badge for details. Instrumental tracks are identified in t
 
 Checks use the candidate recording’s duration when known and otherwise the imported file duration. Artwork is checked with a HEAD request following redirects, rather than downloading a complete image for every candidate. Successful JSON lookups and positive/negative artwork checks are reused for 15 minutes. Transient failures stay unknown. Background checks are focused on the selected track; results for changed selections, removed tracks, replaced candidate lists or changed connections are ignored. Android contacts the same public services directly without a PC.
 
-The Windows service exposes `POST /tracks/{id}/availability` with candidate `title`, `artist`, `album`, optional release UUID and optional duration. Its response includes nullable `has_lyrics`/`has_cover`, an `instrumental` flag and warnings. `/health` reports version `1.3.0` and `candidate_availability: true` so the running service can be checked after rebuilding.
+The Windows service exposes `POST /tracks/{id}/availability` with candidate `title`, `artist`, `album`, optional release UUID and optional duration. Its response includes nullable `has_lyrics`/`has_cover`, an `instrumental` flag and warnings. `/health` reports version `1.6.0` and `candidate_availability: true` so the running service can be checked after rebuilding.
 
 ## Manual editing
 
@@ -124,11 +124,35 @@ flutter test
 flutter build windows --release
 ```
 
-On Windows, bootstrap downloads Gyan’s FFmpeg 9.0.2 essentials ZIP (about 109 MB) over HTTPS and verifies the pinned SHA-256 before installation. The portable helper is built from the supplied TagLib/Chromaprint sources by CMake. The decoder is copied into the app’s `tools/` folder with its notices and build provenance. Android builds do not download or include it. The download is a build-time step; the finished Windows app does not download executables at runtime or search PATH for tools.
+On Windows, bootstrap downloads Gyan’s FFmpeg 9.0.2 essentials ZIP (about 109 MB), first from the publisher’s GitHub mirror and then from gyan.dev if needed. HTTPS certificate verification and the pinned SHA-256 are required before installation. The portable helper is built from the supplied TagLib/Chromaprint sources by CMake. The decoder is copied into the app’s `tools/` folder with its notices and build provenance. Android builds do not download or include it. The download is a build-time step; the finished Windows app does not download executables at runtime or search PATH for tools.
 
 Distribute the entire `client/build/windows/x64/runner/Release/` folder, including `tools/`, Flutter data and DLLs. End users do not need Python, Docker, FFmpeg installation or a running service. Windows 10/11 x64 is the supported desktop target. This package contains source, not a built EXE.
 
 Launch the app and import music immediately. **On this PC** opens the free AcoustID key and MusicBrainz contact settings. Without a key, manual editing, artwork embedding, lyric editing and export still work offline. Online recognition requires Internet access and the free application key; metadata search requires the contact setting. Decoding and tag writing run as local child processes without a shell or HTTP listener. Only fingerprints and lookup text go to the music services.
+
+## Bootstrap download and certificate errors
+
+The reported `CERTIFICATE_VERIFY_FAILED: certificate has expired` occurs during the FFmpeg download's TLS handshake, before extraction. Bootstrap now tries the publisher's independent HTTPS mirrors, rejects incorrect checksums, cleans partial downloads and reports a concise error if both sources fail. It retains certificate verification. A verified cached archive is reused without a network request; an invalid cache is downloaded again. Previously installed tools are retained if a download or replacement fails.
+
+Retry normally with:
+
+```sh
+python tools/bootstrap_client.py
+```
+
+If both hosts fail verification, check Windows date/time and certificate trust. You can download the exact pinned [FFmpeg 9.0.2 essentials ZIP](https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip) in a browser, then supply it directly:
+
+```sh
+python tools/bootstrap_client.py --ffmpeg-archive "C:/Downloads/ffmpeg-9.0.2-essentials_build.zip"
+```
+
+That bypasses only the FFmpeg network download. The archive must still match SHA-256 `60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba`. Flutter/Gradle may still need network access for their own dependencies. For a managed network that uses its own trusted certificate authority, an additional PEM bundle can be supplied without disabling normal certificate/hostname verification:
+
+```sh
+python tools/bootstrap_client.py --ca-bundle "C:/Certificates/organization-root.pem"
+```
+
+These options affect Windows decoder preparation. Android remains independent of the Windows decoder and backend. All options can be inspected with `python tools/bootstrap_client.py --help`.
 
 ## Optional Windows backend service
 

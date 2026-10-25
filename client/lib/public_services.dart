@@ -150,9 +150,10 @@ class PublicMusicServices {
     if (acoustIdKey.isEmpty)
       return {
         'signature': hash,
+        'lookup_performed': false,
         'candidates': [],
         'warnings': [
-          'Fingerprint extracted on this phone. Add a free AcoustID application key in Online settings to match it, or search by name.',
+          'Fingerprint extracted on this device. Add a free AcoustID application key in Online settings to match it, or search by name.',
         ],
       };
     final data =
@@ -186,6 +187,7 @@ class PublicMusicServices {
     }
     return {
       'signature': hash,
+      'lookup_performed': true,
       'candidates': all.take(24).toList(),
       'warnings': all.isEmpty
           ? ['No fingerprint match. Try a title or artist search.']

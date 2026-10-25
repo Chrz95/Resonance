@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 """Generate SDK-owned Windows/Android runners without overwriting application code."""
 import shutil
+import argparse
 import subprocess
 import sys
 from pathlib import Path
 from windows_session import install_windows_session
 from windows_audio import install_windows_audio
-from windows_tools import prepare_windows_tools
+from windows_tools import DownloadError, prepare_windows_tools
 
 
-def main():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--ffmpeg-archive', type=Path, help='Use the pinned FFmpeg ZIP from disk, with checksum verification and no download')
+    parser.add_argument('--ca-bundle', type=Path, help='Add a trusted PEM CA bundle for HTTPS downloads; verification remains enabled')
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
     client = Path(__file__).resolve().parents[1] / "client"
     flutter = shutil.which("flutter")
     if not flutter:
@@ -50,7 +59,10 @@ def main():
     install_windows_session(client)
     install_windows_audio(client)
     if sys.platform == 'win32':
-        prepare_windows_tools(client)
+        try:
+            prepare_windows_tools(client, local_archive=args.ffmpeg_archive, ca_bundle=args.ca_bundle)
+        except (DownloadError, OSError) as exc:
+            raise SystemExit(f"Windows audio setup failed:\n{exc}") from None
     subprocess.run([flutter, "pub", "get"], cwd=client, check=True)
     print("Ready. Run flutter analyze, flutter test, and flutter run -d windows (or an Android device) in client/.")
 

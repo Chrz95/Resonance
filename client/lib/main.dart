@@ -20,6 +20,9 @@ import 'song_import.dart';
 import 'alternate_picker.dart';
 import 'session_store.dart';
 import 'recovering_engine.dart';
+import 'recognition_queue.dart';
+import 'recognition_result.dart';
+import 'batch_controls.dart';
 
 const background = Color(0xFF101116);
 const panel = Color(0xFF191A22);
@@ -144,12 +147,14 @@ class _StudioState extends State<Studio> {
   final sessionMessages = <String>[];
   static const windowSession = MethodChannel('org.resonance/session-window');
   bool closeRequested = false;
+  late final RecognitionQueue batch;
 
   Future<void> initializeWindowSession() async {
     if (!Platform.isWindows || !widget.persistSessions) return;
     windowSession.setMethodCallHandler((call) async {
       if (call.method != 'closeRequested' || closeRequested) return;
       closeRequested = true;
+      batch.cancel();
       availabilityGeneration++;
       try {
         await flushSession(throwOnError: true);
@@ -285,6 +290,7 @@ class _StudioState extends State<Studio> {
             ? ''
             : '${selected!.tags['artist']} ${selected!.tags['title']}'.trim();
         availabilityGeneration++;
+        batch.reset();
       });
       attachRecovery();
     } catch (e) {
@@ -405,6 +411,23 @@ class _StudioState extends State<Studio> {
   @override
   void initState() {
     super.initState();
+    batch = RecognitionQueue(
+      changed: () {
+        if (mounted && !disposed)
+          setState(() {
+            if (batch.active)
+              activity = batch.cancelRequested
+                  ? 'Stopping after the current song…'
+                  : batch.paused
+                  ? 'Recognition paused'
+                  : batch.pauseRequested
+                  ? 'Pausing after the current song…'
+                  : batch.current == null
+                  ? 'Preparing recognition queue…'
+                  : 'Identifying ${batch.current!.label}…';
+          });
+      },
+    );
     lifecycle = AppLifecycleListener(
       onInactive: () => unawaited(flushSession()),
       onPause: () => unawaited(flushSession()),
@@ -497,6 +520,7 @@ class _StudioState extends State<Studio> {
   @override
   void dispose() {
     disposed = true;
+    batch.dispose();
     autosaveTimer?.cancel();
     lifecycle.dispose();
     if (Platform.isWindows && widget.persistSessions)
@@ -977,7 +1001,7 @@ class _StudioState extends State<Studio> {
           .where((f) => f.path != null)
           .map((f) => SongInput(f.path!, f.name))
           .toList();
-      await importSongs(inputs, recognize: false);
+      await importSongs(inputs);
     });
   }
 
@@ -1015,17 +1039,15 @@ class _StudioState extends State<Studio> {
       await settings();
       if (api == null) return;
     }
-    await run(
-      'Importing and identifying dropped songs…',
-      () => importSongs(valid, recognize: true),
-    );
+    await run('Importing and identifying dropped songs…', () async {
+      final imported = await importSongs(valid);
+      if (mounted && imported.isNotEmpty)
+        await identifyMany(imported, alreadyBusy: true);
+    });
   }
 
-  Future<void> importSongs(
-    List<SongInput> inputs, {
-    required bool recognize,
-  }) async {
-    var imported = 0;
+  Future<List<TrackDraft>> importSongs(List<SongInput> inputs) async {
+    final imported = <TrackDraft>[];
     for (final input in inputs) {
       try {
         final error = await songInputError(input);
@@ -1033,7 +1055,8 @@ class _StudioState extends State<Studio> {
           notice('${input.name}: $error', error: true);
           continue;
         }
-        if (mounted) setState(() => activity = 'Reading ${input.name}…');
+        if (!mounted || disposed) break;
+        setState(() => activity = 'Reading ${input.name}…');
         if (tracks.length >= 50)
           throw ApiException('A session can contain at most 50 tracks.');
         final store = sessionStore;
@@ -1042,19 +1065,16 @@ class _StudioState extends State<Studio> {
             'Open a saved workspace before importing. Check the session error message.',
           );
         final staged = await store?.stageAudio(input.path, input.name);
-        Map<String, dynamic> importedData;
+        Map<String, dynamic> data;
         try {
-          importedData = await api!.upload(
-            staged?.path ?? input.path,
-            input.name,
-          );
+          data = await api!.upload(staged?.path ?? input.path, input.name);
         } catch (_) {
           if (staged != null) await store!.discard(staged);
           rethrow;
         }
-        final runtimeId = importedData['id'] as String;
+        final runtimeId = data['id'] as String;
         final track = TrackDraft.fromJson({
-          ...importedData,
+          ...data,
           'id': staged?.id ?? runtimeId,
         });
         track.sourcePath = staged?.path ?? input.path;
@@ -1067,51 +1087,77 @@ class _StudioState extends State<Studio> {
           size: track.size,
           digest: track.sourceDigest,
         );
-        if (!mounted) return;
+        if (!mounted || disposed) return imported;
         tracks.add(track);
         select(track);
-        imported++;
-        if (recognize) {
-          setState(() => activity = 'Identifying ${input.name}…');
-          try {
-            await identifyTrack(track);
-          } catch (e) {
-            if (mounted)
-              setState(
-                () => track.notices = [
-                  'Identification failed: $e. Manual editing is available.',
-                ],
-              );
-          }
-        }
+        imported.add(track);
       } catch (e) {
         notice('${input.name}: $e', error: true);
       }
     }
-    if (imported > 0)
+    if (imported.isNotEmpty)
       notice(
-        '$imported ${imported == 1 ? 'file' : 'files'} imported${recognize ? ' and checked for recognition' : ''}.',
+        '${imported.length} ${imported.length == 1 ? 'file' : 'files'} imported.',
       );
+    return imported;
   }
 
-  Future<void> identify() => run(
-    'Listening to the audio fingerprint…',
-    () => identifyTrack(selected!),
-  );
+  Future<void> identify() => identifyMany([selected!]);
 
-  Future<void> identifyTrack(TrackDraft track) async {
-    final result = await trackEngine.json(
+  Future<void> identifyMany(
+    List<TrackDraft> chosen, {
+    bool alreadyBusy = false,
+  }) async {
+    if (batch.active || (busy && !alreadyBusy)) return;
+    final snapshot = chosen.where(tracks.contains).toList();
+    if (snapshot.isEmpty) {
+      notice('Choose songs for recognition first.');
+      return;
+    }
+    Future<void> work() async {
+      final engine = trackEngine;
+      availabilityGeneration++;
+      await batch.start(
+        snapshot.map(
+          (track) => RecognitionJob(
+            id: track.id,
+            label: track.filename,
+            record: track.recognition,
+            identify: () async {
+              try {
+                return await identifyTrack(track, engine);
+              } catch (e) {
+                if (e is MissingAudioException) track.sourceMissing = true;
+                rethrow;
+              }
+            },
+          ),
+        ),
+      );
+      if (!mounted || disposed) return;
+      await flushSession();
+      if (!mounted || disposed) return;
+      notice(
+        '${batch.count(RecognitionStatus.matched)} matched · ${batch.count(RecognitionStatus.noMatch)} no match · ${batch.count(RecognitionStatus.failed)} failed · ${batch.count(RecognitionStatus.canceled)} canceled. Review matches before saving.',
+      );
+      if (selected != null && selected!.candidates.isNotEmpty)
+        startAvailabilityChecks(selected!);
+    }
+
+    if (alreadyBusy) {
+      await work();
+    } else {
+      await run('Preparing recognition queue…', work);
+    }
+  }
+
+  Future<bool> identifyTrack(TrackDraft track, MusicEngine engine) async {
+    final result = await engine.json(
       '/tracks/${track.id}/identify',
       method: 'POST',
     );
-    if (!mounted) return;
-    setState(() {
-      track.signature = result['signature'] as String;
-      track.candidates = (result['candidates'] as List)
-          .cast<Map<String, dynamic>>();
-      track.notices = (result['warnings'] as List).cast<String>();
-    });
-    startAvailabilityChecks(track);
+    if (!mounted || disposed || !tracks.contains(track)) return false;
+    return updateRecognitionCandidates(track, result);
   }
 
   Future<void> searchTracks() => run('Searching MusicBrainz…', () async {
@@ -1136,7 +1182,8 @@ class _StudioState extends State<Studio> {
   });
 
   void startAvailabilityChecks(TrackDraft track) {
-    if (selected != track || api == null || track.sourceMissing) return;
+    if (selected != track || api == null || track.sourceMissing || batch.active)
+      return;
     final generation = ++availabilityGeneration;
     final engine = trackEngine;
     final entries = track.candidates;
@@ -1583,7 +1630,8 @@ class _StudioState extends State<Studio> {
                 ),
               ),
               if (busy)
-                const LinearProgressIndicator(
+                LinearProgressIndicator(
+                  value: batch.active ? batch.progress : null,
                   minHeight: 2,
                   backgroundColor: panel,
                 ),
@@ -1835,22 +1883,36 @@ class _StudioState extends State<Studio> {
             badge('${tracks.length} files', color: muted),
           ],
         ),
+        BatchControls(
+          tracks: tracks,
+          queue: batch,
+          blocked: busy,
+          recognize: (chosen) => unawaited(identifyMany(chosen)),
+          selectAll: (value) => setState(() {
+            for (final track in tracks) {
+              track.recognition.selected = value;
+            }
+          }),
+        ),
         const SizedBox(height: 16),
         SizedBox(
-          height: 86,
+          height: 118,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: tracks.length,
             separatorBuilder: (_, _) => const SizedBox(width: 10),
-            itemBuilder: (context, i) {
-              final track = tracks[i];
+            itemBuilder: (context, index) {
+              final track = tracks[index];
               final active = selected == track;
+              final queued =
+                  batch.active &&
+                  track.recognition.status == RecognitionStatus.queued;
               return InkWell(
-                onTap: busy ? null : () => select(track),
+                onTap: busy && !batch.active ? null : () => select(track),
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
-                  width: 265,
-                  padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+                  width: 310,
+                  padding: const EdgeInsets.fromLTRB(4, 10, 6, 10),
                   decoration: BoxDecoration(
                     color: active ? accent.withValues(alpha: .09) : background,
                     borderRadius: BorderRadius.circular(12),
@@ -1862,13 +1924,16 @@ class _StudioState extends State<Studio> {
                   ),
                   child: Row(
                     children: [
-                      Icon(
-                        track.exported
-                            ? Icons.check_circle_rounded
-                            : Icons.audio_file_outlined,
-                        color: track.exported ? mint : accent,
+                      Checkbox(
+                        value: track.recognition.selected,
+                        semanticLabel: 'Include ${track.filename} in batch',
+                        onChanged: busy
+                            ? null
+                            : (value) => setState(
+                                () =>
+                                    track.recognition.selected = value == true,
+                              ),
                       ),
-                      const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -1886,18 +1951,36 @@ class _StudioState extends State<Studio> {
                             const SizedBox(height: 5),
                             Text(
                               '${track.filename.split('.').last.toUpperCase()} · ${track.time} · ${(track.size / 1048576).toStringAsFixed(1)} MiB',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 fontSize: 11,
                                 color: muted,
                               ),
                             ),
+                            const SizedBox(height: 6),
+                            RecognitionStatusChip(track.recognition),
+                            if (track.exported)
+                              const Text(
+                                'Tagged copy saved',
+                                style: TextStyle(fontSize: 10, color: mint),
+                              ),
                           ],
                         ),
                       ),
                       IconButton(
-                        onPressed: busy ? null : () => remove(track),
-                        icon: const Icon(Icons.close_rounded, size: 15),
-                        tooltip: 'Remove file from session',
+                        onPressed: queued
+                            ? () => batch.skip(track.id)
+                            : busy
+                            ? null
+                            : () => remove(track),
+                        icon: Icon(
+                          queued ? Icons.skip_next : Icons.close_rounded,
+                          size: 17,
+                        ),
+                        tooltip: queued
+                            ? 'Skip queued song'
+                            : 'Remove file from session',
                       ),
                     ],
                   ),
@@ -1909,7 +1992,6 @@ class _StudioState extends State<Studio> {
       ],
     ),
   );
-
   Widget recognition() {
     final track = selected!;
     return card(
@@ -1931,6 +2013,13 @@ class _StudioState extends State<Studio> {
             'Recognize the sound, search by name, or edit every detail manually.',
             style: TextStyle(color: muted, fontSize: 13, height: 1.5),
           ),
+          const SizedBox(height: 12),
+          RecognitionStatusChip(track.recognition),
+          if (track.recognition.error.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: info(track.recognition.error),
+            ),
           const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,

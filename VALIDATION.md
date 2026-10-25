@@ -1,3 +1,30 @@
+# Validation record — Resonance 1.6.0
+
+Updated 25 October 2026.
+
+This is the complete merged source. The delivered 1.6 batch overlay was applied successfully to the attached 1.5.0+7 archive after its real-source preflight passed. No overlay installer is needed to use this package.
+
+Checks executed on the merged project:
+
+- **93 tests passed**: 65 backend cases and 28 tools/native-helper cases, using Python 3.12 and the newly built native helper on Linux. The test adapter emitted a Starlette deprecation notice; there were no failures or skipped tests in the final run.
+- Twelve download/bootstrap regression tests cover an expired TLS certificate followed by a verified mirror, certificate/hostname verification settings, failures on both mirrors, wrong checksums, local ZIP installation, invalid local ZIPs, valid and invalid caches, explicit CA loading, rollback of an installation failure, CLI option parsing/forwarding, preserving Dart sources when generating the runner, and concise bootstrap errors. HTTP responses are simulated; this is not a reproduction on the user's Windows certificate store or Python 3.15.
+- Built `resonance_desktop` and `resonance_native_test` with CMake/GCC from the supplied pinned source archives.
+- Native tagging and helper protocol checks passed for MP3, FLAC, M4A, Ogg Vorbis and Opus: Unicode, metadata, plain/timed lyrics, artwork replace/keep/remove and clearing. Original bytes and decoded PCM hashes were preserved. Native Chromaprint results matched host FFmpeg for the same PCM.
+- All **33 Dart application/test files** in the merged project passed the WebAssembly formatter syntax check. Fifteen new Flutter cases cover queue order/deduplication, failure isolation, pause/cancel/skip/retry, overlap/limit rejection, interruption, persistence, preservation of edits and checkbox-scoped controls.
+- The pinned checksum and official mirror relationship were checked against the publisher's public metadata. The 109 MB Windows archive was not downloaded/executed here. The downloader tests use fixture archives and mocked HTTPS responses.
+
+Not executed:
+
+- Dart/Flutter runtime tests or analyzer. A direct Dart smoke attempt still aborts with `Failed to retrieve stack bounds` before the isolate starts; the formatter check is not a type check.
+- Native Windows/Android app compilation, Windows save/credential dialogs, Windows Python 3.15 bootstrap execution, device lifecycle recovery or device rendering of batch controls. The source includes CI for these environments, but no remote workflow was triggered.
+- Live fingerprint recognition against AcoustID with an application key.
+
+The bootstrap certificate fix uses verified alternate sources and a checksum-validated local-archive option. It does not disable TLS verification or modify the machine's certificate store. A machine clock or network certificate issue affecting both mirrors can still require the documented local ZIP or trusted-CA option.
+
+Earlier validation records follow for context; their version-specific limitations describe those preparation runs.
+
+---
+
 # Validation record — Resonance 1.5.0
 
 Updated 25 October 2026.
