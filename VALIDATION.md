@@ -1,3 +1,17 @@
+# YouTube cover update — Resonance 1.6.1
+
+Adds a key-free external YouTube search/link workflow, a bounded oEmbed/thumbnail client, validated preview, explicit Use/Save actions and source attribution. Shared Flutter code serves standalone Windows, Android and optional Windows backend mode. No backend code changed.
+
+Validation for this update is recorded separately from previous versions below. New Flutter tests cover accepted/rejected links, Unicode search encoding, canonical request construction, no credential forwarding, thumbnail host/path restrictions, unavailable videos, invalid metadata, redirect rejection, byte limits and disabled picker actions before a successful preview.
+
+Executed here: all **36 Dart application/test files parsed successfully** with the WebAssembly Dart formatter, and the changed Dart files were formatted. This is a syntax check, not type analysis. The pinned `url_launcher` 6.3.2 package metadata was checked: Dart 3.6+/Flutter 3.27+, compatible with the project's Dart 3.8+ baseline.
+
+Flutter SDK is not installed in this workspace. The new Flutter tests, analyzer, Windows/Android builds and device interactions have not been executed here. Live YouTube preview could not be checked through the available web fetcher. Native browser launching, document saving, image decoding and a successful live thumbnail round trip still require platform verification. No EXE or APK is included. Prior-version results below do not validate the new feature.
+
+Run after bootstrap: `cd client`, `flutter analyze --no-fatal-infos`, `flutter test`, then build and verify on each platform. Check Use/Save/Cancel, reopen a saved workspace, verify exported artwork, and try a private/unavailable link with an existing draft cover.
+
+---
+
 # Validation record — Resonance 1.6.0
 
 Updated 25 October 2026.

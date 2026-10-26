@@ -18,6 +18,7 @@ import 'models.dart';
 import 'connection_store.dart';
 import 'song_import.dart';
 import 'alternate_picker.dart';
+import 'youtube_cover_picker.dart';
 import 'session_store.dart';
 import 'recovering_engine.dart';
 import 'recognition_queue.dart';
@@ -1239,6 +1240,49 @@ class _StudioState extends State<Studio> {
     },
   );
 
+  Future<void> youtubeCover([
+    Map<String, dynamic>? candidate,
+  ]) => run('Choosing a YouTube thumbnail…', () async {
+    final track = selected!;
+    final choice = await pickYoutubeCover(
+      context,
+      title: '${candidate?['title'] ?? track.tags['title'] ?? track.filename}',
+      artist: '${candidate?['artist'] ?? track.tags['artist'] ?? ''}',
+    );
+    if (choice == null || !mounted) return;
+    final image = choice.cover;
+    if (choice.save) {
+      final path = await FilePicker.platform.saveFile(
+        fileName: 'youtube-cover.jpg',
+        bytes: image.bytes,
+        type: FileType.custom,
+        allowedExtensions: ['jpg'],
+      );
+      if (path != null) {
+        // Android writes through its document provider; desktop returns a path.
+        if (!Platform.isAndroid && !Platform.isIOS) {
+          await File(path).writeAsBytes(image.bytes, flush: true);
+        }
+        notice('YouTube thumbnail saved.');
+      }
+      return;
+    }
+    setState(() {
+      track.cover = image.bytes;
+      track.coverAction = 'replace';
+      track.revision++;
+      track.exported = false;
+      track.sources = {...track.sources, image.videoUrl.toString()}.toList();
+      if (candidate != null) {
+        track.selectedCandidate = candidate;
+        candidate['alternate_has_cover'] = true;
+        candidate['alternate_cover_source'] = 'YouTube';
+      }
+      tab = 2;
+    });
+    notice('YouTube thumbnail loaded. Review it before saving a tagged copy.');
+  });
+
   Future<void> otherSources(Map<String, dynamic> candidate, String kind) => run(
     kind == 'cover'
         ? 'Searching alternate artwork…'
@@ -2216,6 +2260,11 @@ class _StudioState extends State<Studio> {
               label: const Text('Other covers'),
             ),
             TextButton.icon(
+              onPressed: busy ? null : () => youtubeCover(c),
+              icon: const Icon(Icons.smart_display_outlined, size: 16),
+              label: const Text('YouTube cover'),
+            ),
+            TextButton.icon(
               onPressed: busy ? null : () => otherSources(c, 'lyrics'),
               icon: const Icon(Icons.lyrics_outlined, size: 16),
               label: const Text('Other lyrics'),
@@ -2522,6 +2571,11 @@ class _StudioState extends State<Studio> {
             onPressed: busy ? null : chooseCover,
             icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
             label: const Text('Choose image'),
+          ),
+          OutlinedButton.icon(
+            onPressed: busy ? null : () => youtubeCover(),
+            icon: const Icon(Icons.smart_display_outlined, size: 18),
+            label: const Text('YouTube cover'),
           ),
           TextButton(
             onPressed: busy

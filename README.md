@@ -10,7 +10,7 @@ Android runs independently on your phone. Windows runs locally on your PC. Neith
 
 [Features](#what-you-can-do) · [Getting started](#getting-started) · [Build Android](#build-android) · [Build Windows](#build-standalone-windows) · [Privacy](#privacy-and-free-services)
 
-> **Current source version: 1.6.0.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
+> **Current source version: 1.6.1.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
 
 ## What you can do
 
@@ -97,6 +97,23 @@ Windows defaults to local processing. If you prefer the Python service, choose *
 Use **Use on this PC** to return to local processing or **Forget saved connection** to remove saved credentials. Workspaces are kept separately for local processing and each backend URL. Offline backend drafts remain editable, but processing and export in that mode need the service. Reconnection does not start Docker or install a service.
 
 Android remains fully independent of this optional backend.
+
+## YouTube thumbnails as covers
+
+Choose **YouTube cover** on a candidate entry or in the **Cover** editor—even when editing manually without a match.
+
+1. Adjust the suggested artist/title search and choose **Search on YouTube**. YouTube opens in your browser or installed app.
+2. Copy a video's link, return to Resonance and paste it into **YouTube video link**.
+3. Choose **Preview thumbnail** to see the video title, channel and full thumbnail.
+4. Choose **Use cover** to update the draft, or **Save image** to download a separate JPEG. Use **Save tagged copy** to embed it in your audio copy.
+
+This option needs no YouTube API key or paid service. Search happens on YouTube; results are not scraped or listed inside Resonance. Standard watch links, shortened `youtu.be` links, YouTube Music, Shorts, live and embed links are accepted. The app retrieves public video information and its supplied thumbnail directly from YouTube, on both Windows and Android, including when Windows uses the optional backend. No full video or audio is downloaded.
+
+The preview keeps the thumbnail's full aspect ratio; rectangular images and text are not cropped away. Thumbnails may differ from official album artwork. Private, deleted, restricted or unavailable videos can fail; try another link. Images must be valid, at most 5 MiB and at most 25 megapixels. Downloads use HTTPS, restrict thumbnail addresses to YouTube's image host and reject redirects. Only an explicit **Use cover** action changes the draft, records the source video link and marks the selected candidate's cover badge. Cancel, failed lookups and separate image downloads leave the draft intact. Your existing cover remains available via **Keep original**.
+
+Opening search sends the entered search text to YouTube. Preview requests send the selected video ID to YouTube and download its thumbnail. Use images you have permission to use; thumbnails retain their owners' rights.
+
+To update from 1.6.0, rerun `python tools/bootstrap_client.py` to resolve the added `url_launcher` dependency, then rebuild the Windows app or Android APK. This is a client update; no backend endpoint or new credential is required.
 
 ## Build Android
 
