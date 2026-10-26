@@ -10,7 +10,7 @@ Android runs independently on your phone. Windows runs locally on your PC. Neith
 
 [Features](#what-you-can-do) · [Getting started](#getting-started) · [Build Android](#build-android) · [Build Windows](#build-standalone-windows) · [Privacy](#privacy-and-free-services)
 
-> **Current source version: 1.6.1.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
+> **Current source version: 1.6.2.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
 
 ## What you can do
 
@@ -98,22 +98,24 @@ Use **Use on this PC** to return to local processing or **Forget saved connectio
 
 Android remains fully independent of this optional backend.
 
-## YouTube thumbnails as covers
+## Find cover suggestions automatically on YouTube
 
-Choose **YouTube cover** on a candidate entry or in the **Cover** editor—even when editing manually without a match.
+Choose **YouTube cover** on a candidate entry or in the **Cover** editor. Resonance immediately searches with the song title and artist and presents up to **eight ranked thumbnail suggestions** inside the app. If the title is blank, it uses the audio filename. This works independently on Windows and Android, with no YouTube API key or paid service.
 
-1. Adjust the suggested artist/title search and choose **Search on YouTube**. YouTube opens in your browser or installed app.
-2. Copy a video's link, return to Resonance and paste it into **YouTube video link**.
-3. Choose **Preview thumbnail** to see the video title, channel and full thumbnail.
-4. Choose **Use cover** to update the draft, or **Save image** to download a separate JPEG. Use **Save tagged copy** to embed it in your audio copy.
+Each suggestion includes a thumbnail, video title, channel, duration where available, and clues explaining its ranking. Ranking favors matching title/artist, similar duration, official-audio or artwork clues, and Topic channels. Unrequested karaoke, cover performances, remixes, reactions, tutorials and live versions are ranked lower. Live streams and duplicate videos are excluded. These are suggestions, not verified album-art matches or confidence percentages.
 
-This option needs no YouTube API key or paid service. Search happens on YouTube; results are not scraped or listed inside Resonance. Standard watch links, shortened `youtu.be` links, YouTube Music, Shorts, live and embed links are accepted. The app retrieves public video information and its supplied thumbnail directly from YouTube, on both Windows and Android, including when Windows uses the optional backend. No full video or audio is downloaded.
+1. Open **YouTube cover** and review the suggested images.
+2. Choose **Preview this cover** to inspect the full thumbnail and source video details.
+3. Choose **Use cover** to update the draft, or **Save image** to download a separate JPEG.
+4. Use **Save tagged copy** to embed the chosen cover in your audio copy.
 
-The preview keeps the thumbnail's full aspect ratio; rectangular images and text are not cropped away. Thumbnails may differ from official album artwork. Private, deleted, restricted or unavailable videos can fail; try another link. Images must be valid, at most 5 MiB and at most 25 megapixels. Downloads use HTTPS, restrict thumbnail addresses to YouTube's image host and reject redirects. Only an explicit **Use cover** action changes the draft, records the source video link and marks the selected candidate's cover badge. Cancel, failed lookups and separate image downloads leave the draft intact. Your existing cover remains available via **Keep original**.
+You can refine the search and choose **Find covers** again. New searches discard previous results and pending selections. There is no automatic cover selection or file overwrite. The full thumbnail aspect ratio is kept, and the source video link is saved with your draft. **Keep original** restores the imported artwork.
 
-Opening search sends the entered search text to YouTube. Preview requests send the selected video ID to YouTube and download its thumbnail. Use images you have permission to use; thumbnails retain their owners' rights.
+**Fallback:** use **Open YouTube**, or paste a watch, `youtu.be`, Music, Shorts, live or embed link into **YouTube video link** and choose **Preview thumbnail**. Search and thumbnail availability can vary by network, region and video restrictions. The free search client (`youtube_explode_dart`, BSD-3-Clause) reads YouTube's public search pages rather than the official keyed Data API, so upstream page changes or blocks may interrupt search. No login or browser session is used; the app reports failures and leaves manual editing and link preview available.
 
-To update from 1.6.0, rerun `python tools/bootstrap_client.py` to resolve the added `url_launcher` dependency, then rebuild the Windows app or Android APK. This is a client update; no backend endpoint or new credential is required.
+Only search text, video metadata and thumbnails are exchanged with YouTube; no song audio, backend token or video/audio stream is uploaded or downloaded. Search occurs when you open this picker or request another search. Result preview JPEGs are capped at 512 KiB each; selected covers are capped at 5 MiB and validated before use, with a 25-megapixel limit. Thumbnails are not necessarily official album artwork. Use images you have permission to use; their owners retain their rights.
+
+To update, rerun `python tools/bootstrap_client.py` to resolve the added search dependency, then rebuild the Windows app or Android APK. This is a client update; no backend endpoint or new credential is required.
 
 ## Build Android
 

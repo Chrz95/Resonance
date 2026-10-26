@@ -210,7 +210,9 @@ void main() {
   ) async {
     await tester.pumpWidget(
       const MaterialApp(
-        home: Scaffold(body: YoutubeCoverPicker(query: 'Artist Song')),
+        home: Scaffold(
+          body: YoutubeCoverPicker(query: 'Artist Song', autoSearch: false),
+        ),
       ),
     );
     expect(

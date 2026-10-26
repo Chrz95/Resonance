@@ -1,3 +1,30 @@
+# Test timing correction — Resonance 1.6.2
+
+The replaced-search widget test now pumps a frame after editing the query, before tapping Find covers. The edit changes the button's enabled state through setState; tapping without rebuilding still hits the previously disabled widget, so the replacement search never starts. Assertions now verify the initial pending query, the disabled/enabled button transition, both requested queries, the replacement result before completing the old request, and retention of that result afterward.
+
+This is a test-only correction; application behavior and version are unchanged. Syntax parsing was rerun for all 38 Dart files. Flutter is unavailable in this workspace, so the corrected test and full Flutter suite have not been executed here. The provided log reports two failures but includes the traceback for only this test; the other failure has not been diagnosed.
+
+Run from client/: `flutter test test/youtube_search_test.dart`, then `flutter test`.
+
+---
+
+# Automatic YouTube cover suggestions — Resonance 1.6.2
+
+The YouTube cover picker now searches on opening using artist/title (or the audio filename when title is blank), ranks at most eight suggestions from the first search page, and displays thumbnails, channels, durations and matching clues. Users explicitly preview and use/save a result. Query changes cancel previous searches and invalidate selected previews. The link/browser fallback remains available. Direct shared Flutter code serves Windows, Android and optional Windows backend mode.
+
+Validation performed for this update:
+
+- All **38 Dart application/test files parsed successfully** with the WebAssembly Dart formatter; changed Dart files were formatted. This checks syntax, not types.
+- Inspected the pinned `youtube_explode_dart` 3.1.0 package source and metadata to verify its search API, video fields, client cleanup and SDK range. Bumped the direct crypto pin to 3.0.7 to satisfy the search package dependency. Dependency resolution itself requires Flutter bootstrap and was not executed here.
+- A live public YouTube search returned HTTP 200 with 20 video entries in the structure consumed by the search package. A selected result's oEmbed response returned a title and valid thumbnail host/path. Thumbnail image requests from this execution environment returned non-image responses, so a live image round trip was **not** verified. This HTTP probe did not execute the Dart search library.
+- Added ranking/service tests for exact song preference, artist/title/duration clues, version handling, Unicode, nonfinite durations, duplicate/invalid/live filtering, result limits, stable ties, query construction, invalid input, errors and cancellation. Added widget tests for automatic search, preview action gating, selection reset and ignoring superseded search results. The prior manual-link test now disables automatic lookup to stay offline.
+
+Flutter SDK is unavailable here. Flutter tests, dependency resolution, analyzer, Windows/Android builds and device interactions remain **unexecuted**. No EXE/APK is included. Existing CI runs Flutter tests and both builds when triggered; no remote workflow was triggered here. Prior-version results below do not verify this feature.
+
+Run `python tools/bootstrap_client.py`, then from `client/`: `flutter analyze --no-fatal-infos`, `flutter test`, and the appropriate platform build. On both platforms check automatic results, an artist-only/title-only/Unicode song, a blank-title filename fallback, modified queries, rapid retries, failed thumbnail previews, manual link fallback, Use/Save/Cancel, reopened source attribution and exported artwork. Upstream public-search page changes, regional restrictions or blocks may require a package update or link fallback.
+
+---
+
 # YouTube cover update — Resonance 1.6.1
 
 Adds a key-free external YouTube search/link workflow, a bounded oEmbed/thumbnail client, validated preview, explicit Use/Save actions and source attribution. Shared Flutter code serves standalone Windows, Android and optional Windows backend mode. No backend code changed.

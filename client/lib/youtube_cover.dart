@@ -51,7 +51,7 @@ class YoutubeCover {
 }
 
 /// Direct client shared by Windows (including backend mode) and Android.
-/// No API key, audio upload, backend change or scraping is involved.
+/// No API key, audio upload or backend change is involved.
 class YoutubeCovers {
   YoutubeCovers({http.Client? client}) : _client = client ?? http.Client();
   final http.Client _client;
@@ -80,6 +80,17 @@ class YoutubeCovers {
       bytes.add(chunk);
     }
     return bytes.takeBytes();
+  }
+
+  Future<Uint8List> thumbnail(String id) async {
+    if (!RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(id)) {
+      throw ApiException('Invalid video identifier.');
+    }
+    return _get(
+      Uri.https('i.ytimg.com', '/vi/$id/mqdefault.jpg'),
+      512 * 1024,
+      'image/jpeg',
+    ).timeout(const Duration(seconds: 15));
   }
 
   Future<YoutubeCover> load(String input) async {

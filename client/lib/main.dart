@@ -1244,10 +1244,15 @@ class _StudioState extends State<Studio> {
     Map<String, dynamic>? candidate,
   ]) => run('Choosing a YouTube thumbnail…', () async {
     final track = selected!;
+    final title = '${candidate?['title'] ?? track.tags['title'] ?? ''}'.trim();
+    final seconds = candidate?['duration'];
     final choice = await pickYoutubeCover(
       context,
-      title: '${candidate?['title'] ?? track.tags['title'] ?? track.filename}',
+      title: title.isEmpty
+          ? track.filename.replaceFirst(RegExp(r'\.[^.]+$'), '')
+          : title,
       artist: '${candidate?['artist'] ?? track.tags['artist'] ?? ''}',
+      duration: seconds is num ? seconds.toDouble() : track.duration,
     );
     if (choice == null || !mounted) return;
     final image = choice.cover;
