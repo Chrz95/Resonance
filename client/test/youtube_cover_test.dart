@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -21,6 +22,9 @@ http.Response metadata({String thumbnail = imageUrl}) => http.Response(
   200,
   headers: {'content-type': 'application/json; charset=utf-8'},
 );
+
+Uint8List fixture(String size) =>
+    File('test/fixtures/youtube-$size.jpg').readAsBytesSync();
 
 void main() {
   test(
@@ -78,9 +82,12 @@ void main() {
           );
           return metadata();
         }
-        expect(request.url.toString(), imageUrl);
+        expect(
+          request.url.toString(),
+          'https://i.ytimg.com/vi/$id/maxresdefault.jpg',
+        );
         return http.Response.bytes(
-          [255, 216, 255, 217],
+          fixture('maxres'),
           200,
           headers: {'content-type': 'image/jpeg'},
         );
@@ -90,10 +97,98 @@ void main() {
       final cover = await service.load('https://youtu.be/$id');
       expect(cover.title, 'A song');
       expect(cover.author, 'Artist');
-      expect(cover.bytes, [255, 216, 255, 217]);
+      expect((cover.width, cover.height), (1280, 720));
+      expect(cover.bytes, fixture('maxres'));
       expect(seen, hasLength(2));
     },
   );
+
+  test(
+    'missing maximum resolution falls back to standard resolution',
+    () async {
+      final seen = <String>[];
+      final service = YoutubeCovers(
+        client: MockClient((request) async {
+          if (request.url.path == '/oembed') return metadata();
+          seen.add(request.url.pathSegments.last);
+          if (seen.last == 'maxresdefault.jpg') return http.Response('', 404);
+          return http.Response.bytes(
+            fixture('standard'),
+            200,
+            headers: {'content-type': 'image/jpeg'},
+          );
+        }),
+      );
+      addTearDown(service.close);
+      final cover = await service.load('https://youtu.be/$id');
+      expect(seen, ['maxresdefault.jpg', 'sddefault.jpg']);
+      expect((cover.width, cover.height), (640, 480));
+      expect(cover.bytes, fixture('standard'));
+    },
+  );
+
+  test(
+    'tiny HTTP-200 placeholders and invalid images fall back to high resolution',
+    () async {
+      final seen = <String>[];
+      final service = YoutubeCovers(
+        client: MockClient((request) async {
+          if (request.url.path == '/oembed') return metadata();
+          seen.add(request.url.pathSegments.last);
+          return http.Response.bytes(
+            seen.last == 'maxresdefault.jpg'
+                ? fixture('placeholder')
+                : seen.last == 'sddefault.jpg'
+                ? [255, 216, 255, 217]
+                : fixture('high'),
+            200,
+            headers: {'content-type': 'image/jpeg'},
+          );
+        }),
+      );
+      addTearDown(service.close);
+      final cover = await service.load('https://youtu.be/$id');
+      expect(seen, ['maxresdefault.jpg', 'sddefault.jpg', 'hqdefault.jpg']);
+      expect((cover.width, cover.height), (480, 360));
+    },
+  );
+
+  test(
+    'all unavailable variants fail and duplicate oEmbed URLs are not retried',
+    () async {
+      final seen = <String>[];
+      final service = YoutubeCovers(
+        client: MockClient((request) async {
+          if (request.url.path == '/oembed') return metadata();
+          seen.add(request.url.pathSegments.last);
+          return http.Response('', 404);
+        }),
+      );
+      addTearDown(service.close);
+      await expectLater(
+        service.load('https://youtu.be/$id'),
+        throwsA(isA<ApiException>()),
+      );
+      expect(seen, ['maxresdefault.jpg', 'sddefault.jpg', 'hqdefault.jpg']);
+    },
+  );
+
+  test('rate limiting stops resolution retries', () async {
+    var imageCalls = 0;
+    final service = YoutubeCovers(
+      client: MockClient((request) async {
+        if (request.url.path == '/oembed') return metadata();
+        imageCalls++;
+        return http.Response('', 429);
+      }),
+    );
+    addTearDown(service.close);
+    await expectLater(
+      service.load('https://youtu.be/$id'),
+      throwsA(isA<ApiException>()),
+    );
+    expect(imageCalls, 1);
+  });
 
   test('invalid link makes no HTTP request', () async {
     final service = YoutubeCovers(

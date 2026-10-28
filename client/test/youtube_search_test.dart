@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -23,6 +24,21 @@ YoutubeSearchVideo video(
   duration: duration,
   live: live,
 );
+
+// Widget tests exercise selection state; real image decoding is covered by
+// youtube_cover_test.dart outside the widget test's fake asynchronous clock.
+class PickerCovers extends YoutubeCovers {
+  PickerCovers({required super.client});
+  @override
+  Future<YoutubeCover> load(String input) async => YoutubeCover(
+    bytes: File('test/fixtures/youtube-maxres.jpg').readAsBytesSync(),
+    title: 'Song',
+    author: 'Artist',
+    videoUrl: Uri.parse('https://www.youtube.com/watch?v=aaaaaaaaaaa'),
+    width: 1280,
+    height: 720,
+  );
+}
 
 void main() {
   test(
@@ -172,7 +188,7 @@ void main() {
     },
   );
 
-  YoutubeCovers covers() => YoutubeCovers(
+  YoutubeCovers covers() => PickerCovers(
     client: MockClient((request) async {
       if (request.url.path == '/oembed') {
         return http.Response(
@@ -185,11 +201,8 @@ void main() {
           headers: {'content-type': 'application/json'},
         );
       }
-      // Tiny valid PNG; decoder validation is independent of the mocked MIME.
       return http.Response.bytes(
-        base64Decode(
-          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
-        ),
+        File('test/fixtures/youtube-maxres.jpg').readAsBytesSync(),
         200,
         headers: {'content-type': 'image/jpeg'},
       );
@@ -250,6 +263,7 @@ void main() {
             .onPressed,
         isNotNull,
       );
+      expect(find.text('1280 × 720 pixels'), findsOneWidget);
       await tester.ensureVisible(find.byType(TextField).first);
       await tester.enterText(find.byType(TextField).first, 'Different search');
       await tester.pump();

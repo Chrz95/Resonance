@@ -10,7 +10,7 @@ Android runs independently on your phone. Windows runs locally on your PC. Neith
 
 [Features](#what-you-can-do) · [Getting started](#getting-started) · [Build Android](#build-android) · [Build Windows](#build-standalone-windows) · [Privacy](#privacy-and-free-services)
 
-> **Current source version: 1.6.2.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
+> **Current source version: 1.6.3.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
 
 ## What you can do
 
@@ -101,6 +101,8 @@ Android remains fully independent of this optional backend.
 ## Find cover suggestions automatically on YouTube
 
 Choose **YouTube cover** on a candidate entry or in the **Cover** editor. Resonance immediately searches with the song title and artist and presents up to **eight ranked thumbnail suggestions** inside the app. If the title is blank, it uses the audio filename. This works independently on Windows and Android, with no YouTube API key or paid service.
+
+Selected covers now try **maximum resolution first**, then standard/high resolution and the video's supplied thumbnail. Missing variants, broken images and tiny placeholder images fall back automatically. The preview shows the actual pixel dimensions. **Use cover** and **Save image** both use these full-resolution bytes; the suggestion list uses smaller previews for faster browsing. Images retain their original aspect ratio without artificial upscaling. A video's maximum available size can vary.
 
 Each suggestion includes a thumbnail, video title, channel, duration where available, and clues explaining its ranking. Ranking favors matching title/artist, similar duration, official-audio or artwork clues, and Topic channels. Unrequested karaoke, cover performances, remixes, reactions, tutorials and live versions are ranked lower. Live streams and duplicate videos are excluded. These are suggestions, not verified album-art matches or confidence percentages.
 

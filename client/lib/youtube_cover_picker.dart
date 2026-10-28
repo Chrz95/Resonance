@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -187,29 +186,7 @@ class _YoutubeCoverPickerState extends State<YoutubeCoverPicker> {
     service = next;
     try {
       final result = await next.load(link.text);
-      // Validate the actual image and dimensions before offering Use or Save.
-      final buffer = await ui.ImmutableBuffer.fromUint8List(result.bytes);
-      try {
-        final descriptor = await ui.ImageDescriptor.encoded(buffer);
-        try {
-          if (descriptor.width < 1 ||
-              descriptor.height < 1 ||
-              descriptor.width * descriptor.height > 25000000) {
-            throw const FormatException('Thumbnail exceeds 25 megapixels.');
-          }
-          final codec = await descriptor.instantiateCodec();
-          try {
-            final frame = await codec.getNextFrame();
-            frame.image.dispose();
-          } finally {
-            codec.dispose();
-          }
-        } finally {
-          descriptor.dispose();
-        }
-      } finally {
-        buffer.dispose();
-      }
+      // The shared cover loader validates and decodes each resolution candidate.
       if (mounted) {
         setState(() => cover = result);
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -402,6 +379,10 @@ class _YoutubeCoverPickerState extends State<YoutubeCoverPicker> {
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
               Text('${cover!.author} · YouTube'),
+              Text(
+                '${cover!.width} × ${cover!.height} pixels',
+                style: const TextStyle(fontSize: 12),
+              ),
               SelectableText(
                 cover!.videoUrl.toString(),
                 style: const TextStyle(fontSize: 11),

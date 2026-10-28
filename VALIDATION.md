@@ -1,3 +1,15 @@
+# Higher-resolution YouTube covers — Resonance 1.6.3
+
+Selected covers try maxresdefault.jpg, sddefault.jpg, hqdefault.jpg, then a distinct validated oEmbed thumbnail URL. Each candidate is bounded to 5 MiB, checked for dimensions and decoded before acceptance. Images below 320×180 (including typical tiny placeholders), over 25 megapixels, corrupt images and failed downloads fall back to the next variant. HTTP 429/503 stop retries; redirects are not followed. Pixel dimensions are displayed. Use/Save share the full-size image bytes; list previews stay compact. Shared image validation now occurs once in the cover loader instead of again in the picker.
+
+Added real JPEG fixtures and service tests for maximum-resolution selection, 404-to-standard fallback, HTTP-200 placeholder/corrupt-image fallback, no usable variant, deduplicated fallback addresses and rate limiting. Widget fixtures isolate selection state from native asynchronous image decoding; decoding is exercised by the service tests. Retains the earlier replaced-search frame correction.
+
+Executed here: all 38 Dart application/test files parsed with the WebAssembly formatter; changed Dart files formatted. Pillow decoded all four fixture JPEGs and confirmed their expected dimensions. Full source ZIP content/integrity checked. These checks do not establish Dart type correctness or runtime behavior.
+
+Flutter SDK is unavailable here. Flutter tests, analyzer, Windows/Android builds and live high-resolution thumbnail retrieval remain unexecuted. No EXE/APK is included. From client/, run `flutter test test/youtube_cover_test.dart test/youtube_search_test.dart`, then `flutter analyze --no-fatal-infos`, `flutter test` and the platform build. Verify both Use and Save with a maximum-resolution video and a video lacking maximum resolution, plus fallback failure with an existing draft cover.
+
+---
+
 # Test timing correction — Resonance 1.6.2
 
 The replaced-search widget test now pumps a frame after editing the query, before tapping Find covers. The edit changes the button's enabled state through setState; tapping without rebuilding still hits the previously disabled widget, so the replacement search never starts. Assertions now verify the initial pending query, the disabled/enabled button transition, both requested queries, the replacement result before completing the old request, and retention of that result afterward.

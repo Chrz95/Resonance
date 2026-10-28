@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -43,11 +45,15 @@ class YoutubeCover {
     required this.title,
     required this.author,
     required this.videoUrl,
+    required this.width,
+    required this.height,
   });
   final Uint8List bytes;
   final String title;
   final String author;
   final Uri videoUrl;
+  final int width;
+  final int height;
 }
 
 /// Direct client shared by Windows (including backend mode) and Android.
@@ -67,6 +73,7 @@ class YoutubeCovers {
         )) {
       throw ApiException(
         'YouTube could not supply this thumbnail. Check the video link or try another video.',
+        statusCode: response.statusCode,
       );
     }
     if ((response.contentLength ?? 0) > limit) {
@@ -91,6 +98,38 @@ class YoutubeCovers {
       512 * 1024,
       'image/jpeg',
     ).timeout(const Duration(seconds: 15));
+  }
+
+  Future<(int, int)> _dimensions(Uint8List bytes) async {
+    try {
+      final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+      try {
+        final descriptor = await ui.ImageDescriptor.encoded(buffer);
+        try {
+          final width = descriptor.width, height = descriptor.height;
+          // Missing variants can return a tiny placeholder with HTTP 200.
+          if (width < 320 || height < 180 || width * height > 25000000) {
+            throw const FormatException('Thumbnail is too small or too large.');
+          }
+          final codec = await descriptor.instantiateCodec();
+          try {
+            final frame = await codec.getNextFrame();
+            frame.image.dispose();
+          } finally {
+            codec.dispose();
+          }
+          return (width, height);
+        } finally {
+          descriptor.dispose();
+        }
+      } finally {
+        buffer.dispose();
+      }
+    } catch (_) {
+      throw const FormatException(
+        'Thumbnail is invalid, too small or too large.',
+      );
+    }
   }
 
   Future<YoutubeCover> load(String input) async {
@@ -129,14 +168,38 @@ class YoutubeCovers {
           'YouTube returned an unsupported thumbnail address.',
         );
       }
-      final bytes = await _get(image, 5 * 1024 * 1024, 'image/jpeg');
-      return YoutubeCover(
-        bytes: bytes,
-        title: metadata['title'] as String,
-        author: metadata['author_name'] is String
-            ? metadata['author_name'] as String
-            : '',
-        videoUrl: video,
+      // Keep compact search previews separate from the image used for export.
+      // Only locally constructed paths and the validated oEmbed URL are tried.
+      for (final uri in <Uri>{
+        Uri.https('i.ytimg.com', '/vi/$id/maxresdefault.jpg'),
+        Uri.https('i.ytimg.com', '/vi/$id/sddefault.jpg'),
+        Uri.https('i.ytimg.com', '/vi/$id/hqdefault.jpg'),
+        image,
+      }) {
+        try {
+          final bytes = await _get(uri, 5 * 1024 * 1024, 'image/jpeg');
+          final (width, height) = await _dimensions(bytes);
+          return YoutubeCover(
+            bytes: bytes,
+            title: metadata['title'] as String,
+            author: metadata['author_name'] is String
+                ? metadata['author_name'] as String
+                : '',
+            videoUrl: video,
+            width: width,
+            height: height,
+          );
+        } on TimeoutException {
+          rethrow;
+        } on ApiException catch (e) {
+          // Do not multiply requests when YouTube asks clients to back off.
+          if ([429, 503].contains(e.statusCode)) rethrow;
+        } on FormatException {
+          // Try a smaller real image instead of a placeholder/broken file.
+        }
+      }
+      throw ApiException(
+        'No usable YouTube cover was available. Try another video.',
       );
     })().timeout(const Duration(seconds: 40));
   }
