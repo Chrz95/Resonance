@@ -993,17 +993,55 @@ class _StudioState extends State<Studio> {
       if (api == null) return;
     }
     await run('Choosing audio…', () async {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: songExtensions.toList(),
-        allowMultiple: true,
-      );
-      if (result == null) return;
-      final inputs = result.files
-          .where((f) => f.path != null)
-          .map((f) => SongInput(f.path!, f.name))
-          .toList();
-      await importSongs(inputs);
+      final List<SongInput> inputs;
+      if (Platform.isAndroid) {
+        final result = await const MethodChannel(
+          'org.resonance/audio',
+        ).invokeMapMethod<String, dynamic>('pickSongs');
+        if (result == null) return;
+        for (final warning in result['warnings'] as List? ?? []) {
+          notice('$warning', error: true);
+        }
+        inputs = (result['files'] as List).map((raw) {
+          final item = raw as Map;
+          return SongInput(
+            item['path'] as String,
+            item['filename'] as String,
+            originalUri: item['original_uri'] as String,
+          );
+        }).toList();
+      } else {
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: songExtensions.toList(),
+          allowMultiple: true,
+        );
+        if (result == null) return;
+        inputs = result.files
+            .where((f) => f.path != null)
+            .map((f) => SongInput(f.path!, f.name))
+            .toList();
+      }
+      try {
+        await importSongs(inputs);
+      } finally {
+        if (Platform.isAndroid &&
+            widget.persistSessions &&
+            sessionStore != null) {
+          try {
+            await const MethodChannel(
+              'org.resonance/audio',
+            ).invokeMethod<void>('releasePickedSongs', {
+              'paths': inputs
+                  .where((input) => input.originalUri != null)
+                  .map((input) => input.path)
+                  .toList(),
+            });
+          } catch (_) {
+            /* Stale picker copies are also cleaned up at startup. */
+          }
+        }
+      }
     });
   }
 
@@ -1066,6 +1104,9 @@ class _StudioState extends State<Studio> {
           throw ApiException(
             'Open a saved workspace before importing. Check the session error message.',
           );
+        final originalPath = Platform.isAndroid
+            ? null
+            : await File(input.path).resolveSymbolicLinks();
         final staged = await store?.stageAudio(input.path, input.name);
         Map<String, dynamic> data;
         try {
@@ -1080,6 +1121,8 @@ class _StudioState extends State<Studio> {
           'id': staged?.id ?? runtimeId,
         });
         track.sourcePath = staged?.path ?? input.path;
+        track.originalUri = input.originalUri;
+        track.originalPath = originalPath;
         track.sourceDigest = staged?.digest;
         trackEngine.register(
           track.id,
@@ -1438,15 +1481,22 @@ class _StudioState extends State<Studio> {
     });
   });
 
-  Future<void>
-  overwriteOriginal() => run('Preparing to overwrite the original…', () async {
+  Future<void> overwriteOriginal({
+    bool locate = false,
+  }) => run('Preparing to overwrite the original…', () async {
     final track = selected!;
+    final remembered = Platform.isAndroid
+        ? (!locate ? track.originalUri : null)
+        : (!locate ? track.originalPath : null);
+    final known =
+        remembered != null &&
+        (Platform.isAndroid || await File(remembered).exists());
     final accepted = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: const Text('Overwrite the original song?'),
         content: Text(
-          'Replace the tags, lyrics and cover in ${track.filename}. Select the existing original song next. Its contents must match the import or your last overwrite. Keep a separate backup for long-term recovery. Do not edit the song in another app while saving.',
+          'Replace the tags, lyrics and cover in ${track.filename}.${known ? '\n\n$remembered' : '\n\nLocate the original once to remember its location.'} Keep a separate backup and avoid editing the song in another app while saving.',
         ),
         actions: [
           TextButton(
@@ -1455,7 +1505,7 @@ class _StudioState extends State<Studio> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialog, true),
-            child: const Text('Choose original and overwrite'),
+            child: Text(known ? 'Overwrite song' : 'Locate and overwrite'),
           ),
         ],
       ),
@@ -1468,42 +1518,51 @@ class _StudioState extends State<Studio> {
         track.sourceDigest ??
         await songDigest(File(source));
     String? digest;
+    String? originalPath;
+    String? originalUri;
     if (Platform.isAndroid) {
-      digest = await trackEngine.overwriteLocalExport(
+      final result = await trackEngine.overwriteLocalExport(
         track.id,
         track.exportBody(),
         track.filename,
         expected,
+        originalUri: known ? remembered : null,
       );
+      digest = result?['digest'] as String?;
+      originalUri = result?['original_uri'] as String?;
     } else {
-      final picked = await FilePicker.platform.pickFiles(
-        dialogTitle: 'Select the original song to overwrite',
-        type: FileType.custom,
-        allowedExtensions: [track.filename.split('.').last.toLowerCase()],
-      );
-      final path = picked?.files.single.path;
+      String? path = known ? remembered : null;
+      if (path == null) {
+        final picked = await FilePicker.platform.pickFiles(
+          dialogTitle: 'Locate the original song',
+          type: FileType.custom,
+          allowedExtensions: [track.filename.split('.').last.toLowerCase()],
+        );
+        path = picked?.files.single.path;
+      }
       if (path == null) return;
       final target = File(path);
-      final canonicalTarget = await target.resolveSymbolicLinks();
+      final canonical = await target.resolveSymbolicLinks();
       final workspace = sessionStore?.root.parent;
       final workspacePath = workspace == null
           ? null
           : await workspace.resolveSymbolicLinks();
-      if (canonicalTarget == await File(source).resolveSymbolicLinks() ||
+      if (canonical == await File(source).resolveSymbolicLinks() ||
           (workspacePath != null &&
-              canonicalTarget.toLowerCase().startsWith(
+              canonical.toLowerCase().startsWith(
                 '${workspacePath.toLowerCase()}${Platform.pathSeparator}',
               ))) {
         throw ApiException(
-          'Choose the original song outside the private working-copy folder.',
+          'The original must be outside the private working-copy folder.',
         );
       }
       if (await songDigest(target) != expected)
         throw ApiException(
-          'This is not the imported song or its last overwritten version. Import the changed file again.',
+          'The original song has changed. Import the changed file again before overwriting it.',
         );
       final bytes = await trackEngine.export(track.id, track.exportBody());
       digest = await overwriteSong(target, bytes, expected);
+      originalPath = canonical;
     }
     if (digest == null) {
       notice('Overwrite canceled. Your edits are still here.');
@@ -1512,6 +1571,8 @@ class _StudioState extends State<Studio> {
     if (mounted)
       setState(() {
         track.overwriteDigest = digest;
+        track.originalPath = originalPath ?? track.originalPath;
+        track.originalUri = originalUri ?? track.originalUri;
       });
     await flushSession();
     notice('Original song updated with your tags, lyrics and artwork.');
@@ -2511,9 +2572,13 @@ class _StudioState extends State<Studio> {
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: busy ? null : overwriteOriginal,
+            onPressed: busy ? null : () => overwriteOriginal(),
             icon: const Icon(Icons.save_outlined),
             label: const Text('Overwrite original song'),
+          ),
+          TextButton(
+            onPressed: busy ? null : () => overwriteOriginal(locate: true),
+            child: const Text('Locate original for overwrite'),
           ),
           if (Platform.isAndroid)
             TextButton(

@@ -4,6 +4,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.content.pm.PackageManager
+import android.os.Process
 import android.os.Handler
 import android.os.Looper
 import io.flutter.embedding.android.FlutterActivity
@@ -20,6 +24,7 @@ class MainActivity : FlutterActivity() {
     private val main = Handler(Looper.getMainLooper())
     private val tracks = mutableMapOf<String, File>()
     private val limit = 120L * 1024L * 1024L
+    private var pendingPick: MethodChannel.Result? = null
     private var pendingSave: MethodChannel.Result? = null
     private var pendingFile: File? = null
     private var pendingOverwrite = false
@@ -33,18 +38,49 @@ class MainActivity : FlutterActivity() {
         root.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 86_400_000L }?.forEach { it.deleteRecursively() }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "org.resonance/audio")
             .setMethodCallHandler { call, result ->
+                if (call.method == "pickSongs") {
+                    try {
+                        check(pendingSave == null && pendingPick == null) { "A document dialog is already open." }
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "application/ogg", "application/octet-stream"))
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                        }
+                        pendingPick = result
+                        startActivityForResult(intent, 7320)
+                    } catch (e: Exception) {
+                        pendingPick = null; result.error("PICK_ERROR", e.message, null)
+                    }
+                    return@setMethodCallHandler
+                }
                 if (call.method == "saveFile" || call.method == "overwriteFile") {
                     try {
-                        check(pendingSave == null) { "A save dialog is already open." }
+                        check(pendingSave == null && pendingPick == null) { "A document dialog is already open." }
                         val file = File(requireNotNull(call.argument<String>("path"))).canonicalFile
                         val overwrite = call.method == "overwriteFile"
                         check(file.isFile && (file.path.startsWith(root.canonicalPath + File.separator) ||
                             (!overwrite && file.path.startsWith(recoveryRoot.canonicalPath + File.separator)))) { "Invalid export file." }
+                        val originalUri = call.argument<String>("original_uri")
+                        if (overwrite && originalUri != null) {
+                            val uri = Uri.parse(originalUri)
+                            check(uri.scheme == "content") { "Invalid original document URI." }
+                            worker.execute {
+                                try {
+                                    val value = overwriteDocument(file, uri,
+                                        requireNotNull(call.argument<String>("expected_digest")),
+                                        call.argument<String>("filename") ?: "song")
+                                    main.post { result.success(value) }
+                                } catch (e: Exception) { main.post { result.error("SAVE_ERROR", e.message, null) } }
+                            }
+                            return@setMethodCallHandler
+                        }
                         val mimeType = when (file.extension) { "mp3" -> "audio/mpeg"; "flac" -> "audio/flac"; "m4a" -> "audio/mp4"; else -> "audio/ogg" }
                         val intent = Intent(if (overwrite) Intent.ACTION_OPEN_DOCUMENT else Intent.ACTION_CREATE_DOCUMENT).apply {
                             addCategory(Intent.CATEGORY_OPENABLE)
                             type = if (overwrite) "*/*" else mimeType
-                            if (overwrite) addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                            if (overwrite) addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                             putExtra(Intent.EXTRA_TITLE, call.argument<String>("filename"))
                         }
                         pendingSave = result; pendingFile = file
@@ -73,6 +109,51 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 7320) {
+            val result = pendingPick ?: return
+            pendingPick = null
+            if (resultCode != Activity.RESULT_OK || data == null) { result.success(null); return }
+            val uris = linkedSetOf<Uri>()
+            data.data?.let { uris.add(it) }
+            data.clipData?.let { clip -> for (index in 0 until clip.itemCount) uris.add(clip.getItemAt(index).uri) }
+            worker.execute {
+                val files = mutableListOf<Map<String, String>>()
+                val warnings = mutableListOf<String>()
+                if (uris.size > 50) warnings.add("Only the first 50 selected songs were imported.")
+                var totalImported = 0L
+                for (uri in uris.take(50)) {
+                    val folder = File(File(cacheDir, "resonance"), "picker-${UUID.randomUUID()}").apply { mkdirs() }
+                    try {
+                        check(uri.scheme == "content") { "Choose a document-provider audio file." }
+                        val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                            val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (cursor.moveToFirst() && column >= 0) cursor.getString(column) else null
+                        }?.substringAfterLast('/')?.substringAfterLast('\\') ?: "song"
+                        val extension = name.substringAfterLast('.', "").lowercase()
+                        check(extension in listOf("mp3", "flac", "m4a", "ogg", "opus")) { "Unsupported audio file: $name" }
+                        val file = File(folder, "source.$extension")
+                        contentResolver.openInputStream(uri)?.use { input -> file.outputStream().use { output ->
+                            val buffer = ByteArray(65536)
+                            var total = 0L
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                total += count
+                                check(total <= limit) { "Song exceeds 120 MiB: $name" }
+                                check(totalImported + total <= 2L * 1024L * 1024L * 1024L) { "Selected audio exceeds 2 GiB." }
+                                output.write(buffer, 0, count)
+                            }
+                            check(total > 0) { "Song is empty: $name" }
+                        } } ?: error("Cannot read $name")
+                        totalImported += file.length()
+                        if (!rememberDocument(uri, data.flags)) warnings.add("$name: persistent access is unavailable; locating the original may be needed after restart.")
+                        files.add(mapOf("path" to file.absolutePath, "filename" to name, "original_uri" to uri.toString()))
+                    } catch (e: Exception) { folder.deleteRecursively(); warnings.add(e.message ?: "Could not import audio.") }
+                }
+                main.post { result.success(mapOf("files" to files, "warnings" to warnings)) }
+            }
+            return
+        }
         if (requestCode != 7319) return
         val result = pendingSave ?: return
         val file = pendingFile
@@ -86,11 +167,9 @@ class MainActivity : FlutterActivity() {
         worker.execute {
             try {
                 if (overwrite) {
-                    val backup = File(recoveryRoot, "${UUID.randomUUID()}-$filename")
-                    val digest = SafeDocumentOverwrite.replace(file, requireNotNull(expected), backup,
-                        read = { contentResolver.openInputStream(uri) ?: error("Cannot read the selected song.") },
-                        write = { contentResolver.openOutputStream(uri, "rwt") ?: error("Cannot overwrite the selected song.") })
-                    main.post { result.success(digest) }
+                    rememberDocument(uri, data?.flags ?: 0)
+                    val value = overwriteDocument(file, uri, requireNotNull(expected), filename)
+                    main.post { result.success(value) }
                 } else {
                     file.inputStream().use { input ->
                         (contentResolver.openOutputStream(uri, "wt") ?: error("Cannot open the selected destination.")).use { output -> input.copyTo(output) }
@@ -101,12 +180,42 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun rememberDocument(uri: Uri, flags: Int): Boolean {
+        return try {
+            val access = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            contentResolver.takePersistableUriPermission(uri, access)
+            contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission && it.isWritePermission }
+        } catch (_: Exception) { false }
+    }
+
+    private fun overwriteDocument(file: File, uri: Uri, expected: String, filename: String): Map<String, String> {
+        check(listOf(Intent.FLAG_GRANT_READ_URI_PERMISSION, Intent.FLAG_GRANT_WRITE_URI_PERMISSION).all {
+            checkUriPermission(uri, Process.myPid(), Process.myUid(), it) == PackageManager.PERMISSION_GRANTED
+        }) {
+            "Original document access is missing or read-only. Use Locate original for overwrite to grant access again."
+        }
+        val name = filename.substringAfterLast('/').substringAfterLast('\\')
+        val backup = File(recoveryRoot, "${UUID.randomUUID()}-$name")
+        val digest = SafeDocumentOverwrite.replace(file, expected, backup,
+            read = { contentResolver.openInputStream(uri) ?: error("Cannot read the original song.") },
+            write = { contentResolver.openOutputStream(uri, "rwt") ?: error("Cannot overwrite the original song.") })
+        return mapOf("digest" to digest, "original_uri" to uri.toString())
+    }
+
     private fun track(call: MethodCall): File = tracks[call.argument<String>("id")]?.takeIf { it.isFile }
         ?: error("This audio session expired. Import the file again.")
 
     private fun dispatch(call: MethodCall, root: File): Any? {
         val preferences = getSharedPreferences("online-services", MODE_PRIVATE)
         return when (call.method) {
+            "releasePickedSongs" -> {
+                for (path in (call.argument<List<String>>("paths") ?: emptyList()).take(50)) {
+                    val folder = File(path).canonicalFile.parentFile ?: continue
+                    check(folder.parentFile?.canonicalPath == root.canonicalPath && folder.name.startsWith("picker-")) { "Invalid picker cache path." }
+                    folder.deleteRecursively()
+                }
+                null
+            }
             "listOverwriteBackups" -> recoveryRoot.listFiles()?.filter { it.isFile && !it.name.endsWith(".part") }?.sortedByDescending { it.lastModified() }?.map {
                 mapOf("path" to it.absolutePath, "filename" to it.name)
             } ?: emptyList<Map<String, String>>()

@@ -198,18 +198,20 @@ class LocalMusicEngine implements MusicEngine {
     }
   }
 
-  Future<String?> overwriteExport(
+  Future<Map<String, dynamic>?> overwriteExport(
     String id,
     Map<String, dynamic> body,
     String filename,
-    String expected,
-  ) async {
+    String expected, {
+    String? originalUri,
+  }) async {
     final output = await _exportPath(id, body);
     try {
-      return await bridge.invokeMethod<String>('overwriteFile', {
+      return await bridge.invokeMapMethod<String, dynamic>('overwriteFile', {
         'path': output,
         'filename': filename,
         'expected_digest': expected,
+        if (originalUri != null) 'original_uri': originalUri,
       });
     } finally {
       final file = File(output);

@@ -101,14 +101,23 @@ void main() {
         'cover_base64': null,
       });
       draft.sourceDigest = expected;
+      draft.originalPath = r'C:\Music\song.mp3';
+      draft.originalUri = 'content://documents/song';
       draft.overwriteDigest = sha256.convert([5, 6]).toString();
       final restored = TrackDraft.restore(draft.sessionJson());
       expect(restored.overwriteDigest, draft.overwriteDigest);
+      expect(restored.originalPath, draft.originalPath);
+      expect(restored.originalUri, draft.originalUri);
       restored.reset();
       expect(restored.overwriteDigest, draft.overwriteDigest);
       expect(restored.sourceDigest, expected);
-      final old = draft.sessionJson()..remove('overwrite_digest');
+      final old = draft.sessionJson()
+        ..remove('overwrite_digest')
+        ..remove('original_path')
+        ..remove('original_uri');
       expect(TrackDraft.restore(old).overwriteDigest, isNull);
+      expect(TrackDraft.restore(old).originalPath, isNull);
+      expect(TrackDraft.restore(old).originalUri, isNull);
     },
   );
 

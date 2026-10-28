@@ -191,6 +191,63 @@ void main() {
     },
   );
 
+  test(
+    'overwrite forwards remembered document URI and retains fallback URI',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'overwrite-uri-test-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final output = File('${directory.path}/prepared.mp3');
+      const uri = 'content://documents/original-song';
+      String? sentUri;
+      var overwritten = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            final args = call.arguments as Map;
+            if (call.method == 'import')
+              return {
+                'id': 'local-1',
+                'filename': 'song.mp3',
+                'duration': 180.0,
+                'size': 10,
+                'tags': {for (final key in tagNames) key: ''},
+                'cover': Uint8List(0),
+              };
+            if (call.method == 'export') {
+              await output.writeAsBytes([1, 2, 3]);
+              return output.path;
+            }
+            if (call.method == 'overwriteFile') {
+              expect(args['original_uri'], sentUri);
+              expect(args['expected_digest'], 'a' * 64);
+              overwritten++;
+              return {'digest': 'b' * 64, 'original_uri': uri};
+            }
+            throw StateError('Unexpected call: ${call.method}');
+          });
+      await engine.upload('/cached/song.mp3', 'song.mp3');
+      for (final originalUri in <String?>[uri, null]) {
+        sentUri = originalUri;
+        final result = await engine.overwriteExport(
+          'local-1',
+          {
+            'tags': {for (final key in tagNames) key: ''},
+            'cover_action': 'keep',
+          },
+          'song.mp3',
+          'a' * 64,
+          originalUri: originalUri,
+        );
+        expect(result?['original_uri'], uri);
+        expect(result?['digest'], 'b' * 64);
+        expect(await output.exists(), isFalse);
+      }
+      expect(overwritten, 2);
+      expect(requests, isEmpty);
+    },
+  );
+
   test('provider cooldowns are honored', () async {
     final service = PublicMusicServices(
       client: MockClient((request) async {

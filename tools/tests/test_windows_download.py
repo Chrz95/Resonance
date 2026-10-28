@@ -193,6 +193,11 @@ def bootstrap_flow(tmp_path, monkeypatch):
     def run(command, **kwargs):
         commands.append(command)
         if 'create' in command:
+            runner = client / 'windows/runner'
+            runner.mkdir(parents=True, exist_ok=True)
+            (runner / 'Runner.rc').write_text('IDI_APP_ICON ICON "resources/app_icon.ico"\n')
+            (runner / 'resource.h').write_text('#define IDI_APP_ICON 101\n')
+            (runner / 'CMakeLists.txt').write_text('add_executable(${BINARY_NAME} "Runner.rc")\n')
             (client / 'android/app/src/main').mkdir(parents=True)
             (client / 'android/app/build.gradle.kts').write_text('// Generated Gradle\n')
             (client / 'lib/main.dart').write_text('// Generated counter')

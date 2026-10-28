@@ -1,3 +1,27 @@
+# Explicit Windows executable icon binding — Resonance 1.7.2
+
+Windows branding now patches the SDK-generated Runner.rc icon statement to reference a dedicated resources/resonance.ico under IDI_APP_ICON (101), preserving version metadata. The standard window icon resource ID remains unchanged so the runner loads the same branded resource. CMake copies the committed Resonance ICO during configuration and adds resource dependencies for rebuilds. If Flutter regeneration resets the icon statement, configuration fails with instructions to rerun bootstrap. Both the dedicated ICO and the conventional app_icon.ico contain the brand asset.
+
+Added tools/verify_windows_icon.py and a Windows CI step after flutter build. On Windows it loads the EXE as resource data, requires the single application icon group 101 and compares each embedded RT_ICON image with the committed ICO. It does not run the EXE. This is intended to catch a stale/default executable resource before packaging.
+
+Executed here: **26 Python bootstrap/branding/decoder/close-hook tests passed**. Checks include installer idempotency and source preservation, unchanged RC version text, rejection of changed templates, a real CMake configure in a path containing spaces, replacement of deliberately reset icon files at configuration, rejection of a default RC reference, and icon-group byte comparison accepting the brand and rejecting different artwork. Python sources parsed successfully. Existing Android assets and application Dart code are unchanged apart from the pubspec version increment.
+
+Not executed here: MSVC resource compilation, a Windows Flutter build, the Win32 resource-loading branch against a built EXE, Explorer/taskbar rendering or icon-cache refresh. The new Windows CI step will exercise compiled-resource verification when the workflow is triggered; no remote workflow was triggered here. No prebuilt EXE is supplied. Bootstrap, clean, rebuild and run the documented executable-icon verification on Windows.
+
+---
+
+# Remember original overwrite targets — Resonance 1.7.1
+
+Windows imports and drops now retain the canonical original path separately from the immutable working-copy path. Android audio import now uses ACTION_OPEN_DOCUMENT with multiple selection, captures original document URIs and takes available persistent grants. Normal overwrite reuses the stored target, with the existing explicit confirmation and checksum/backup/rollback checks. URI access is checked before attempting a write. Older drafts or a missing Windows file use a one-time lookup; Android permission loss reports the Locate original for overwrite action. Successful fallback overwrites return and retain their URI/path. Origin references and overwrite checksums survive sessions and Reset.
+
+Android picker copies are bounded per file and in aggregate, and released after durable import; expired leftovers also use existing startup cleanup. The app never treats Android picker cache paths as original song paths. Providers without persistent write access are reported rather than assumed writable. No broad storage permission is added.
+
+Validation for this update: all 40 Dart application/test files parsed with the WebAssembly formatter; modified files formatted. Modified MainActivity and SafeDocumentOverwrite compiled against Android API 28 with Flutter/native-audio test stubs. Added session round-trip/backward-compatibility assertions for original path/URI and a mocked Android engine test covering remembered-URI forwarding, fallback-URI return and temporary export cleanup. These Flutter tests were not executed because Flutter is unavailable and the standalone Dart VM aborts at startup in this environment.
+
+Not verified here: actual Android picker/grant persistence across process/device restarts, cloud/read-only providers, Windows remembered-path writes, Dart type analysis, full platform builds and Flutter test execution. Run bootstrap and fully rebuild; hot reload alone cannot install the new native picker. Test a new import and repeated overwrite without a second picker, session restart, moved original, a legacy draft, revoked URI grant and unchanged-audio export on both platforms. The prior 1.7.0 host recovery and bootstrap test results below remain relevant to unchanged components, not proof of this new native document workflow.
+
+---
+
 # Integrated icon and original-file overwrite — Resonance 1.7.0
 
 The generated Resonance icon is committed as a Flutter image asset, a Windows multi-size ICO, and Android legacy/adaptive resources. Bootstrap installs the committed native resources after Flutter platform generation; no image conversion runs on user machines. The app header uses the same icon.

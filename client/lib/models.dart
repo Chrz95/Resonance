@@ -38,6 +38,8 @@ class TrackDraft {
   String? sourcePath;
   String? sourceDigest;
   String? overwriteDigest;
+  String? originalPath;
+  String? originalUri;
   bool sourceMissing = false;
   RecognitionRecord recognition = RecognitionRecord();
   final Map<String, String> original;
@@ -92,6 +94,8 @@ class TrackDraft {
     'tags': Map<String, String>.of(tags),
     'source_digest': sourceDigest,
     'overwrite_digest': overwriteDigest,
+    'original_path': originalPath,
+    'original_uri': originalUri,
     'cover_action': coverAction,
     'signature': signature,
     'candidates': jsonDecode(jsonEncode(candidates)),
@@ -131,6 +135,12 @@ class TrackDraft {
     }
     draft.sourceDigest = data['source_digest'] as String?;
     draft.overwriteDigest = data['overwrite_digest'] as String?;
+    draft.originalPath = data['original_path'] as String?;
+    draft.originalUri = data['original_uri'] as String?;
+    if (draft.originalUri != null &&
+        Uri.tryParse(draft.originalUri!)?.scheme != 'content') {
+      throw const FormatException('Invalid original document URI.');
+    }
     if (draft.overwriteDigest != null &&
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(draft.overwriteDigest!)) {
       throw const FormatException('Invalid overwrite checksum.');

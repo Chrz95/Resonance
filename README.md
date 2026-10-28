@@ -10,7 +10,7 @@ Android runs independently on your phone. Windows runs locally on your PC. Neith
 
 [Features](#what-you-can-do) · [Getting started](#getting-started) · [Build Android](#build-android) · [Build Windows](#build-standalone-windows) · [Privacy](#privacy-and-free-services)
 
-> **Current source version: 1.7.0.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
+> **Current source version: 1.7.2.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
 
 ## What you can do
 
@@ -100,10 +100,12 @@ Android remains fully independent of this optional backend.
 
 ## Save a copy or overwrite the song
 
-**Save tagged copy** remains available. To update an existing file, choose **Overwrite original song**, confirm, and select the original song in the file/document picker. This is a per-song action; batch recognition never overwrites files automatically.
+**Save tagged copy** remains available. To update the imported song, choose **Overwrite original song** and confirm. Resonance remembers the original Windows path or Android document URI at import, separately from its private working copy, so a normal overwrite does not open another picker. Locations are retained in saved sessions. This is a per-song action; batch recognition never overwrites files automatically.
+
+Drafts imported before 1.7.1 lack the original location and need one lookup. A moved Windows file also needs relinking. Use **Locate original for overwrite** when you need to reselect a target or renew Android document access; successful saves remember the selected location. Revoked/read-only Android access produces an actionable error rather than silently creating another file.
 
 - On **Windows**, the app prepares tagged audio first, stages it beside the selected destination, verifies a backup and checksums, then replaces the file at the same path. Ordinary write/verification failures trigger restoration. If restoration also fails, the error identifies the retained backup path.
-- On **Android**, the system document picker grants access to the existing song. The app streams the prepared file to that document and reads it back to verify the result. Read-only or incompatible providers can reject overwrite. An app-private backup is prepared and verified before writing; failed writes attempt restoration. If restoration fails or the process stops during a write, use **Overwrite recovery backups** in any track editor to save the retained original elsewhere. Recovery backups survive app restarts; export them before clearing app data or uninstalling.
+- On **Android**, importing audio uses the system document picker and requests persistent read/write access to the original document. Normal overwrites reuse that URI. Some providers offer only temporary or read-only access; import reports when persistent write access is unavailable. The app streams the prepared file to that document and reads it back to verify the result. Read-only or incompatible providers can reject overwrite. An app-private backup is prepared and verified before writing; failed writes attempt restoration. If restoration fails or the process stops during a write, use **Overwrite recovery backups** in any track editor to save the retained original elsewhere. Recovery backups survive app restarts; export them before clearing app data or uninstalling.
 - The chosen file must match the imported song byte for byte, or the last version overwritten from this draft. Unrelated or externally changed files are refused. Import an externally edited song again to establish a new baseline. The last successful overwrite checksum is retained in saved sessions for subsequent edits.
 - Overwrite changes tags, lyrics and artwork in the original container. The private imported working audio and **Reset / Keep original** baseline remain the version initially imported. Session saving alone does not write to the original.
 
@@ -161,9 +163,12 @@ Follow [Flutter Windows setup](https://docs.flutter.dev/platform-integration/win
 ```sh
 python tools/bootstrap_client.py
 cd client
+flutter clean
+flutter pub get
 flutter analyze --no-fatal-infos
 flutter test
 flutter build windows --release
+python ../tools/verify_windows_icon.py build/windows/x64/runner/Release/resonance.exe
 ```
 
 On Windows, bootstrap downloads Gyan’s FFmpeg 9.0.2 essentials ZIP (about 109 MB), first from the publisher’s GitHub mirror and then from gyan.dev if needed. HTTPS certificate verification and the pinned SHA-256 are required before installation. The portable helper is built from the supplied TagLib/Chromaprint sources by CMake. The decoder is copied into the app’s `tools/` folder with its notices and build provenance. Android builds do not download or include it. The download is a build-time step; the finished Windows app does not download executables at runtime or search PATH for tools.
@@ -171,6 +176,10 @@ On Windows, bootstrap downloads Gyan’s FFmpeg 9.0.2 essentials ZIP (about 109 
 Distribute the entire `client/build/windows/x64/runner/Release/` folder, including `tools/`, Flutter data and DLLs. End users do not need Python, Docker, FFmpeg installation or a running service. Windows 10/11 x64 is the supported desktop target. This package contains source, not a built EXE.
 
 Launch the app and import music immediately. **On this PC** opens the free AcoustID key and MusicBrainz contact settings. Without a key, manual editing, artwork embedding, lyric editing and export still work offline. Online recognition requires Internet access and the free application key; metadata search requires the contact setting. Decoding and tag writing run as local child processes without a shell or HTTP listener. Only fingerprints and lookup text go to the music services.
+
+The Windows executable explicitly embeds the Resonance ICO through `Runner.rc` resource `IDI_APP_ICON` (101). Bootstrap binds it to `resources/resonance.ico`; CMake refreshes it from the committed brand asset at configuration and tracks icon changes as resource dependencies. A reset resource reference fails the build rather than falling back silently. The verification command reads the completed EXE's resources without running the application and compares every embedded icon image with the supplied Resonance ICO. CI runs this check after its Windows build.
+
+Use the newly rebuilt `resonance.exe` from the release folder. If an older pinned shortcut still shows a cached icon after verification passes, recreate that shortcut for the updated application.
 
 ## Bootstrap download and certificate errors
 

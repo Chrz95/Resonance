@@ -3,9 +3,10 @@ import 'dart:io';
 const songExtensions = {'mp3', 'flac', 'm4a', 'ogg', 'opus'};
 
 class SongInput {
-  const SongInput(this.path, this.name);
+  const SongInput(this.path, this.name, {this.originalUri});
   final String path;
   final String name;
+  final String? originalUri;
   static SongInput fromPath(String path) =>
       SongInput(path, path.split(RegExp(r'[/\\]')).last);
 }
