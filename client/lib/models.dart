@@ -37,6 +37,7 @@ class TrackDraft {
   final int size;
   String? sourcePath;
   String? sourceDigest;
+  String? overwriteDigest;
   bool sourceMissing = false;
   RecognitionRecord recognition = RecognitionRecord();
   final Map<String, String> original;
@@ -90,6 +91,7 @@ class TrackDraft {
     'original': Map<String, String>.of(original),
     'tags': Map<String, String>.of(tags),
     'source_digest': sourceDigest,
+    'overwrite_digest': overwriteDigest,
     'cover_action': coverAction,
     'signature': signature,
     'candidates': jsonDecode(jsonEncode(candidates)),
@@ -128,6 +130,11 @@ class TrackDraft {
         throw const FormatException('Incomplete saved tag draft.');
     }
     draft.sourceDigest = data['source_digest'] as String?;
+    draft.overwriteDigest = data['overwrite_digest'] as String?;
+    if (draft.overwriteDigest != null &&
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(draft.overwriteDigest!)) {
+      throw const FormatException('Invalid overwrite checksum.');
+    }
     if (draft.sourceDigest == null ||
         !RegExp(r'^[a-f0-9]{64}$').hasMatch(draft.sourceDigest!))
       throw const FormatException('Invalid saved audio checksum.');

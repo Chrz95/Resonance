@@ -1,7 +1,7 @@
 name: resonance
 description: Identify music and carefully restore its metadata, lyrics and artwork.
 publish_to: none
-version: 1.6.3+11
+version: 1.7.0+12
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:
@@ -21,3 +21,5 @@ dev_dependencies:
   flutter_lints: 6.0.0
 flutter:
   uses-material-design: true
+  assets:
+    - assets/branding/resonance-icon.png

@@ -15,6 +15,7 @@ import 'local_engine.dart';
 import 'windows_engine.dart';
 import 'engine.dart';
 import 'models.dart';
+import 'overwrite_song.dart';
 import 'connection_store.dart';
 import 'song_import.dart';
 import 'alternate_picker.dart';
@@ -1437,6 +1438,124 @@ class _StudioState extends State<Studio> {
     });
   });
 
+  Future<void>
+  overwriteOriginal() => run('Preparing to overwrite the original…', () async {
+    final track = selected!;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Overwrite the original song?'),
+        content: Text(
+          'Replace the tags, lyrics and cover in ${track.filename}. Select the existing original song next. Its contents must match the import or your last overwrite. Keep a separate backup for long-term recovery. Do not edit the song in another app while saving.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Choose original and overwrite'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    final source = track.sourcePath;
+    if (source == null) throw MissingAudioException(track.id);
+    final expected =
+        track.overwriteDigest ??
+        track.sourceDigest ??
+        await songDigest(File(source));
+    String? digest;
+    if (Platform.isAndroid) {
+      digest = await trackEngine.overwriteLocalExport(
+        track.id,
+        track.exportBody(),
+        track.filename,
+        expected,
+      );
+    } else {
+      final picked = await FilePicker.platform.pickFiles(
+        dialogTitle: 'Select the original song to overwrite',
+        type: FileType.custom,
+        allowedExtensions: [track.filename.split('.').last.toLowerCase()],
+      );
+      final path = picked?.files.single.path;
+      if (path == null) return;
+      final target = File(path);
+      final canonicalTarget = await target.resolveSymbolicLinks();
+      final workspace = sessionStore?.root.parent;
+      final workspacePath = workspace == null
+          ? null
+          : await workspace.resolveSymbolicLinks();
+      if (canonicalTarget == await File(source).resolveSymbolicLinks() ||
+          (workspacePath != null &&
+              canonicalTarget.toLowerCase().startsWith(
+                '${workspacePath.toLowerCase()}${Platform.pathSeparator}',
+              ))) {
+        throw ApiException(
+          'Choose the original song outside the private working-copy folder.',
+        );
+      }
+      if (await songDigest(target) != expected)
+        throw ApiException(
+          'This is not the imported song or its last overwritten version. Import the changed file again.',
+        );
+      final bytes = await trackEngine.export(track.id, track.exportBody());
+      digest = await overwriteSong(target, bytes, expected);
+    }
+    if (digest == null) {
+      notice('Overwrite canceled. Your edits are still here.');
+      return;
+    }
+    if (mounted)
+      setState(() {
+        track.overwriteDigest = digest;
+      });
+    await flushSession();
+    notice('Original song updated with your tags, lyrics and artwork.');
+  });
+
+  Future<void> recoverOverwriteBackup() => run(
+    'Opening overwrite recovery backups…',
+    () async {
+      const channel = MethodChannel('org.resonance/audio');
+      final backups =
+          await channel.invokeListMethod<dynamic>('listOverwriteBackups') ?? [];
+      if (!mounted) return;
+      if (backups.isEmpty) {
+        notice('No overwrite recovery backups are pending.');
+        return;
+      }
+      final chosen = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (dialog) => SimpleDialog(
+          title: const Text('Save a recovery backup'),
+          children: [
+            for (final raw in backups)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(
+                  dialog,
+                  Map<String, dynamic>.from(raw as Map),
+                ),
+                child: Text('${(raw as Map)['filename']}'),
+              ),
+          ],
+        ),
+      );
+      if (chosen != null) {
+        final saved =
+            await channel.invokeMethod<bool>('saveFile', chosen) ?? false;
+        notice(
+          saved
+              ? 'Recovery backup saved. The private backup is retained.'
+              : 'Recovery save canceled.',
+        );
+      }
+    },
+  );
+
   Future<void> export() => run('Writing tags to a new copy…', () async {
     final track = selected!;
     if (api is LocalMusicEngine) {
@@ -1465,6 +1584,8 @@ class _StudioState extends State<Studio> {
       notice('Save canceled. Your edits are still here.');
       return;
     }
+    if (!Platform.isAndroid && !Platform.isIOS)
+      await File(output).writeAsBytes(bytes, flush: true);
     if (!mounted) return;
     setState(() => track.exported = true);
     notice('Saved ${track.exportName} with metadata, lyrics and artwork.');
@@ -1593,10 +1714,13 @@ class _StudioState extends State<Studio> {
                         color: accent,
                         borderRadius: BorderRadius.circular(13),
                       ),
-                      child: const Icon(
-                        Icons.graphic_eq_rounded,
-                        color: background,
-                        size: 27,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(13),
+                        child: Image.asset(
+                          'assets/branding/resonance-icon.png',
+                          width: 42,
+                          height: 42,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1906,8 +2030,8 @@ class _StudioState extends State<Studio> {
             ),
             Feature(
               icon: Icons.verified_user_outlined,
-              title: 'Keep your originals',
-              text: 'Review, then save a copy',
+              title: 'Choose how to save',
+              text: 'Save a copy or update the original',
             ),
           ],
         ),
@@ -2364,7 +2488,7 @@ class _StudioState extends State<Studio> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '${track.changes} changes · Original file preserved',
+                  '${track.changes} changes · ${track.overwriteDigest == null ? 'Original not overwritten' : 'Original overwritten; import baseline retained'}',
                   style: const TextStyle(color: muted, fontSize: 11),
                 ),
               ),
@@ -2385,6 +2509,17 @@ class _StudioState extends State<Studio> {
               ),
             ),
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: busy ? null : overwriteOriginal,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Overwrite original song'),
+          ),
+          if (Platform.isAndroid)
+            TextButton(
+              onPressed: busy ? null : recoverOverwriteBackup,
+              child: const Text('Overwrite recovery backups'),
+            ),
           if (track.sources.isNotEmpty) ...[
             const SizedBox(height: 16),
             const Text(

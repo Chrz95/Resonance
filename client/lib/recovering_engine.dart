@@ -164,6 +164,21 @@ class RecoveringEngine implements MusicEngine {
     );
   }
 
+  Future<String?> overwriteLocalExport(
+    String id,
+    Map<String, dynamic> body,
+    String filename,
+    String expected,
+  ) {
+    final local = delegate;
+    if (local is! LocalMusicEngine)
+      throw StateError('On-device engine required.');
+    return _withTrack(
+      id,
+      (runtime) => local.overwriteExport(runtime, body, filename, expected),
+    );
+  }
+
   @override
   void close() => delegate.close();
 }

@@ -22,6 +22,10 @@ class MainActivity : FlutterActivity() {
     private val limit = 120L * 1024L * 1024L
     private var pendingSave: MethodChannel.Result? = null
     private var pendingFile: File? = null
+    private var pendingOverwrite = false
+    private var pendingExpected: String? = null
+    private var pendingName = "song"
+    private val recoveryRoot get() = File(filesDir, "overwrite-recovery").apply { mkdirs() }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -29,21 +33,27 @@ class MainActivity : FlutterActivity() {
         root.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 86_400_000L }?.forEach { it.deleteRecursively() }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "org.resonance/audio")
             .setMethodCallHandler { call, result ->
-                if (call.method == "saveFile") {
+                if (call.method == "saveFile" || call.method == "overwriteFile") {
                     try {
                         check(pendingSave == null) { "A save dialog is already open." }
                         val file = File(requireNotNull(call.argument<String>("path"))).canonicalFile
-                        check(file.isFile && file.path.startsWith(root.canonicalPath + File.separator)) { "Invalid export file." }
+                        val overwrite = call.method == "overwriteFile"
+                        check(file.isFile && (file.path.startsWith(root.canonicalPath + File.separator) ||
+                            (!overwrite && file.path.startsWith(recoveryRoot.canonicalPath + File.separator)))) { "Invalid export file." }
                         val mimeType = when (file.extension) { "mp3" -> "audio/mpeg"; "flac" -> "audio/flac"; "m4a" -> "audio/mp4"; else -> "audio/ogg" }
-                        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        val intent = Intent(if (overwrite) Intent.ACTION_OPEN_DOCUMENT else Intent.ACTION_CREATE_DOCUMENT).apply {
                             addCategory(Intent.CATEGORY_OPENABLE)
-                            type = mimeType
+                            type = if (overwrite) "*/*" else mimeType
+                            if (overwrite) addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                             putExtra(Intent.EXTRA_TITLE, call.argument<String>("filename"))
                         }
                         pendingSave = result; pendingFile = file
+                        pendingOverwrite = overwrite
+                        pendingExpected = call.argument<String>("expected_digest")
+                        pendingName = (call.argument<String>("filename") ?: "song").substringAfterLast('/').substringAfterLast('\\')
                         startActivityForResult(intent, 7319)
                     } catch (e: Exception) {
-                        pendingSave = null; pendingFile = null
+                        pendingSave = null; pendingFile = null; pendingOverwrite = false; pendingExpected = null
                         result.error("SAVE_ERROR", e.message, null)
                     }
                     return@setMethodCallHandler
@@ -66,15 +76,27 @@ class MainActivity : FlutterActivity() {
         if (requestCode != 7319) return
         val result = pendingSave ?: return
         val file = pendingFile
+        val overwrite = pendingOverwrite
+        val expected = pendingExpected
+        val filename = pendingName
+        pendingOverwrite = false; pendingExpected = null
         pendingSave = null; pendingFile = null
         val uri = data?.data
-        if (resultCode != Activity.RESULT_OK || uri == null || file == null) { result.success(false); return }
+        if (resultCode != Activity.RESULT_OK || uri == null || file == null) { result.success(if (overwrite) null else false); return }
         worker.execute {
             try {
-                file.inputStream().use { input ->
-                    (contentResolver.openOutputStream(uri, "wt") ?: error("Cannot open the selected destination.")).use { output -> input.copyTo(output) }
+                if (overwrite) {
+                    val backup = File(recoveryRoot, "${UUID.randomUUID()}-$filename")
+                    val digest = SafeDocumentOverwrite.replace(file, requireNotNull(expected), backup,
+                        read = { contentResolver.openInputStream(uri) ?: error("Cannot read the selected song.") },
+                        write = { contentResolver.openOutputStream(uri, "rwt") ?: error("Cannot overwrite the selected song.") })
+                    main.post { result.success(digest) }
+                } else {
+                    file.inputStream().use { input ->
+                        (contentResolver.openOutputStream(uri, "wt") ?: error("Cannot open the selected destination.")).use { output -> input.copyTo(output) }
+                    }
+                    main.post { result.success(true) }
                 }
-                main.post { result.success(true) }
             } catch (e: Exception) { main.post { result.error("SAVE_ERROR", e.message, null) } }
         }
     }
@@ -85,6 +107,9 @@ class MainActivity : FlutterActivity() {
     private fun dispatch(call: MethodCall, root: File): Any? {
         val preferences = getSharedPreferences("online-services", MODE_PRIVATE)
         return when (call.method) {
+            "listOverwriteBackups" -> recoveryRoot.listFiles()?.filter { it.isFile && !it.name.endsWith(".part") }?.sortedByDescending { it.lastModified() }?.map {
+                mapOf("path" to it.absolutePath, "filename" to it.name)
+            } ?: emptyList<Map<String, String>>()
             "normalizeCover" -> normalizeImage(requireNotNull(call.argument<ByteArray>("cover")))
             "getSettings" -> mapOf("acoustid_key" to preferences.getString("acoustid_key", ""), "user_agent" to preferences.getString("user_agent", ""))
             "saveSettings" -> {

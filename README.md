@@ -2,7 +2,7 @@
 
 **Recognize your music. Complete its tags. Make it yours.**
 
-A Flutter music tagger for **Windows and Android**. Identify songs from their audio fingerprints, find metadata, lyrics and album artwork, then review and save a tagged copy—all in one interface.
+A Flutter music tagger for **Windows and Android**. Identify songs from their audio fingerprints, find metadata, lyrics and album artwork, then review and save a tagged copy or update the original song—all in one interface.
 
 Android runs independently on your phone. Windows runs locally on your PC. Neither needs a companion app or a hosted backend for everyday use.
 
@@ -10,7 +10,7 @@ Android runs independently on your phone. Windows runs locally on your PC. Neith
 
 [Features](#what-you-can-do) · [Getting started](#getting-started) · [Build Android](#build-android) · [Build Windows](#build-standalone-windows) · [Privacy](#privacy-and-free-services)
 
-> **Current source version: 1.6.3.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
+> **Current source version: 1.7.0.** This package contains source and build scripts, not a prebuilt or signed EXE/APK. See [VALIDATION.md](VALIDATION.md) for completed checks and remaining Windows/Android device validation.
 
 ## What you can do
 
@@ -26,7 +26,7 @@ Recognition is optional. Open a song and edit its title, artist, album, album ar
 
 - **Lyrics:** type or paste plain or timed lyrics, import UTF-8 `.txt` or `.lrc` files, remove lyrics, or export a timed `.lrc` sidecar.
 - **Artwork:** keep the embedded cover, replace it with a local JPEG, PNG or WebP image, or remove it.
-- **Export:** save the finished draft as a new tagged audio copy without re-encoding the audio. The original file stays unchanged.
+- **Save your way:** export a tagged copy or explicitly overwrite the existing song, without re-encoding the audio. Saving a copy preserves the original.
 
 Manual editing and export work offline on Android and in local Windows mode, with no account or API key.
 
@@ -72,7 +72,7 @@ Windows uses a bundled TagLib/Chromaprint helper and FFmpeg decoder. Android bun
 3. Open **On this PC** or **On device** to configure online lookup, if wanted.
 4. Choose **Identify audio**, search by metadata, or select **Edit manually — no match needed**.
 5. Review a candidate, fetch lyrics/artwork, and make any edits.
-6. Choose **Save tagged copy** and select a destination.
+6. Choose **Save tagged copy**, or choose **Overwrite original song** to update the existing file.
 
 For audio recognition, register a free **AcoustID application key** at <https://acoustid.org/new-application>. Use an application key, not a personal submission key. MusicBrainz lookup requires a contact email or project URL in the application's user-agent settings. Manual editing and export require neither.
 
@@ -97,6 +97,21 @@ Windows defaults to local processing. If you prefer the Python service, choose *
 Use **Use on this PC** to return to local processing or **Forget saved connection** to remove saved credentials. Workspaces are kept separately for local processing and each backend URL. Offline backend drafts remain editable, but processing and export in that mode need the service. Reconnection does not start Docker or install a service.
 
 Android remains fully independent of this optional backend.
+
+## Save a copy or overwrite the song
+
+**Save tagged copy** remains available. To update an existing file, choose **Overwrite original song**, confirm, and select the original song in the file/document picker. This is a per-song action; batch recognition never overwrites files automatically.
+
+- On **Windows**, the app prepares tagged audio first, stages it beside the selected destination, verifies a backup and checksums, then replaces the file at the same path. Ordinary write/verification failures trigger restoration. If restoration also fails, the error identifies the retained backup path.
+- On **Android**, the system document picker grants access to the existing song. The app streams the prepared file to that document and reads it back to verify the result. Read-only or incompatible providers can reject overwrite. An app-private backup is prepared and verified before writing; failed writes attempt restoration. If restoration fails or the process stops during a write, use **Overwrite recovery backups** in any track editor to save the retained original elsewhere. Recovery backups survive app restarts; export them before clearing app data or uninstalling.
+- The chosen file must match the imported song byte for byte, or the last version overwritten from this draft. Unrelated or externally changed files are refused. Import an externally edited song again to establish a new baseline. The last successful overwrite checksum is retained in saved sessions for subsequent edits.
+- Overwrite changes tags, lyrics and artwork in the original container. The private imported working audio and **Reset / Keep original** baseline remain the version initially imported. Session saving alone does not write to the original.
+
+Keep your own long-term backup and avoid simultaneous writes from other apps. Android document providers do not offer a general atomic replacement guarantee; interrupted writes may require recovery. Windows recovery staging folders may remain after a crash or cleanup failure. No automatic process can restore an original after app data or its recovery backup has been deleted.
+
+## Resonance application icon
+
+The new violet-and-mint icon is included in the app header, Windows executable/taskbar icon, and Android launcher assets. Android includes legacy sizes and a padded adaptive icon for launcher masks. Re-run `python tools/bootstrap_client.py` and rebuild to install these assets into the generated platform runners. No image tools or extra runtime package are required.
 
 ## Find cover suggestions automatically on YouTube
 

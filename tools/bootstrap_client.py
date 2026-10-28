@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from windows_session import install_windows_session
 from windows_audio import install_windows_audio
+from install_branding import install_branding
 from windows_tools import DownloadError, prepare_windows_tools
 
 
@@ -56,6 +57,7 @@ def main(argv=None):
         content = content[:content.index(begin)].rstrip() + "\n"
     content += "\n" + begin + "\n" + (native_sources / "native.gradle.kts").read_text() + "\n// END RESONANCE NATIVE AUDIO\n"
     gradle.write_text(content)
+    install_branding(client)
     install_windows_session(client)
     install_windows_audio(client)
     if sys.platform == 'win32':

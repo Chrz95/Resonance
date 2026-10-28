@@ -1,3 +1,24 @@
+# Integrated icon and original-file overwrite — Resonance 1.7.0
+
+The generated Resonance icon is committed as a Flutter image asset, a Windows multi-size ICO, and Android legacy/adaptive resources. Bootstrap installs the committed native resources after Flutter platform generation; no image conversion runs on user machines. The app header uses the same icon.
+
+Overwrite original song is a separate confirmed per-track action. Users choose an existing song and its SHA-256 must match the import or last successful overwrite. Windows stages the exported bytes beside the target, verifies a backup and replacement, and attempts rollback on failure. Android prepares a tagged file through the existing native export pipeline, then uses ACTION_OPEN_DOCUMENT with read/write access and a streaming verified document replacement. Backups are flushed and verified before writing; partial backup preparations are excluded from the recovery list. Failed restoration or interrupted writes retain verified backups under app-private recovery storage, exposed through Overwrite recovery backups. Original working audio and import baselines remain immutable. Last-overwrite checksums persist in sessions. The optional Windows backend still generates the tagged audio; replacement happens in the Windows app. Also fixed desktop backend Save tagged copy to actually write the bytes to the path returned by file_picker.
+
+Executed for this update:
+
+- **23 Python bootstrap/decoder/close-hook/branding tests passed**, including preservation of application sources, icon reinstallation after runner generation, Windows ICO sizes and Android legacy/adaptive dimensions/padding.
+- Compiled the exact new SafeDocumentOverwrite Kotlin source with Kotlin 2.1.20 on OpenJDK 17 and ran **7 host JVM scenarios**: successful/repeated replacement, wrong checksum refusal, partial-write rollback, failed rollback with retained backup, unreadable source refusal, read-back verification failure with restoration, and invalid checksum rejection. The same scenario object is included in Android instrumentation tests.
+- Compiled modified MainActivity and the transaction helper against Android API 28 with small stubs for Flutter method-channel/engine and existing native-audio interfaces. This checks Kotlin syntax and Android API use; it is not a real Flutter/Gradle build or verification of binding compatibility at runtime.
+- **40 Dart application/test files parsed successfully** with the WebAssembly Dart formatter; changed Dart files formatted. This is a syntax check, not Dart type analysis.
+- Attempted a standalone Dart 3.8.1 host run of the production desktop overwrite helper; the VM aborted with `Failed to retrieve stack bounds` before starting an isolate, including for pub get. No Dart runtime checks executed. Confirmed the staging call against the official Directory.createTemp contract: create the temporary directory inside the existing destination parent.
+- Added Flutter tests for desktop in-place replacement, repeated writes, changed-file refusal, rollback after partial replacement, retained recovery backups, empty output and session checksum/reset compatibility. These tests were not executed here.
+
+Remaining validation: Flutter SDK is unavailable here. Flutter analyzer/tests, actual Windows and Android builds, native file/document pickers, Android provider permissions/cloud behavior, launcher rendering, process-death recovery and real original-song overwrite/export on devices remain unverified. No EXE/APK is included. Provider writes are not guaranteed atomic; users should keep a separate long-term backup. Do not edit a target in another app during overwrite.
+
+After `python tools/bootstrap_client.py`, run from client/: `flutter analyze --no-fatal-infos`, `flutter test`, and the appropriate platform build. The existing CI includes both builds and Android instrumentation when triggered; no remote workflow was triggered here. Device checks should cover all five audio formats, unchanged decoded audio, copy/overwrite/cancel, moved files, changed/read-only documents, repeated saves after restart, recovery backup export, and launcher masks/icon appearance.
+
+---
+
 # Higher-resolution YouTube covers — Resonance 1.6.3
 
 Selected covers try maxresdefault.jpg, sddefault.jpg, hqdefault.jpg, then a distinct validated oEmbed thumbnail URL. Each candidate is bounded to 5 MiB, checked for dimensions and decoded before acceptance. Images below 320×180 (including typical tiny placeholders), over 25 megapixels, corrupt images and failed downloads fall back to the next variant. HTTP 429/503 stop retries; redirects are not followed. Pixel dimensions are displayed. Use/Save share the full-size image bytes; list previews stay compact. Shared image validation now occurs once in the cover loader instead of again in the picker.
